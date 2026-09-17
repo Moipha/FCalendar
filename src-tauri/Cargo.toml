@@ -31,6 +31,8 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 quick-xml = "0.37"
 rrule = "0.13"
 icalendar = "0.16"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"

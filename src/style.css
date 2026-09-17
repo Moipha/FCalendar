@@ -125,3 +125,16 @@
     @apply font-sans;
     }
 }
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+}
+
+body.is-resizing-panes,
+body.is-resizing-panes * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}

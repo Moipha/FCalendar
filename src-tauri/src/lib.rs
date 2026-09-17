@@ -32,7 +32,15 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![db::db_health])
+        .invoke_handler(tauri::generate_handler![
+            db::db_health,
+            db::list_calendars,
+            db::list_events,
+            db::get_event,
+            db::create_event,
+            db::update_event,
+            db::delete_event,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

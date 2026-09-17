@@ -1,9 +1,17 @@
+mod calendars;
+mod events;
+mod ics;
+mod time;
+
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite_migration::{Migrations, M};
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::Manager;
+
+pub use calendars::CalendarRow;
+pub use events::{EventInstance, EventRow, SaveEventInput};
 
 pub struct Db {
     pool: Pool<SqliteConnectionManager>,
@@ -40,19 +48,27 @@ impl Db {
             .build(manager)
             .map_err(|e| format!("create db pool: {e}"))?;
 
-        Ok(Self { pool, path })
+        let db = Self { pool, path };
+        db.with_conn(|conn| calendars::seed_default_calendar(conn))?;
+        Ok(db)
     }
 
-    pub fn health(&self) -> Result<DbHealth, String> {
+    pub fn with_conn<T>(&self, f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {
         let conn = self
             .pool
             .get()
             .map_err(|e| format!("get db connection: {e}"))?;
-        conn.query_row("SELECT 1", [], |_| Ok(()))
-            .map_err(|e| format!("ping db: {e}"))?;
-        Ok(DbHealth {
-            path: self.path.to_string_lossy().into_owned(),
-            ok: true,
+        f(&conn)
+    }
+
+    pub fn health(&self) -> Result<DbHealth, String> {
+        self.with_conn(|conn| {
+            conn.query_row("SELECT 1", [], |_| Ok(()))
+                .map_err(|e| format!("ping db: {e}"))?;
+            Ok(DbHealth {
+                path: self.path.to_string_lossy().into_owned(),
+                ok: true,
+            })
         })
     }
 }
@@ -73,6 +89,52 @@ fn migrate(path: &std::path::Path) -> Result<(), String> {
 #[tauri::command]
 pub fn db_health(db: tauri::State<Db>) -> Result<DbHealth, String> {
     db.health()
+}
+
+#[tauri::command]
+pub fn list_calendars(db: tauri::State<Db>) -> Result<Vec<CalendarRow>, String> {
+    db.with_conn(calendars::list_calendars)
+}
+
+#[tauri::command]
+pub fn list_events(
+    db: tauri::State<Db>,
+    from: String,
+    to: String,
+    calendar_id: Option<String>,
+) -> Result<Vec<EventInstance>, String> {
+    db.with_conn(|conn| {
+        events::list_event_instances(
+            conn,
+            &from,
+            &to,
+            calendar_id.as_deref(),
+        )
+    })
+}
+
+#[tauri::command]
+pub fn get_event(db: tauri::State<Db>, id: String) -> Result<EventRow, String> {
+    db.with_conn(|conn| events::get_event(conn, &id))
+}
+
+#[tauri::command]
+pub fn create_event(db: tauri::State<Db>, input: SaveEventInput) -> Result<EventRow, String> {
+    db.with_conn(|conn| events::create_event(conn, input))
+}
+
+#[tauri::command]
+pub fn update_event(
+    db: tauri::State<Db>,
+    id: String,
+    input: SaveEventInput,
+) -> Result<EventRow, String> {
+    db.with_conn(|conn| events::update_event(conn, &id, input))
+}
+
+#[tauri::command]
+pub fn delete_event(db: tauri::State<Db>, id: String) -> Result<(), String> {
+    db.with_conn(|conn| events::delete_event(conn, &id))
 }
 
 #[cfg(test)]
