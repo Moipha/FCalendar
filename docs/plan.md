@@ -18,9 +18,9 @@
 | ---------------- | -------------------------------------- | ------------------------------------------------------------ |
 | **基础框架**     | **Vue 3 + TypeScript**                 | 响应式开发效率高，组件化架构清晰                             |
 | **构建工具**     | **Vite**                               | 快速热更新与高效静态构建                                     |
-| **日历核心视图** | **Schedule-X (@schedule-x/vue)**       | 现代插件化架构，支持月/周/日视图，原生支持 Vue 3 插槽二次开发，开箱支持事件拖拽与调整大小 |
+| **日历核心视图** | **Schedule-X v4 (@schedule-x/vue)** | 现代插件化架构；当前预览只用月网格。v4 事件时间为 Temporal（`temporal-polyfill@0.3.0`） |
 | **UI 组件库**    | **shadcn-vue**                         | 基于无样式原语组件，源码直接集成进项目，高自由度定制桌面级视觉质感 |
-| **样式系统**     | **Tailwind CSS**                       | 原子化 CSS，便于窗口宽度变化时的自适应布局                   |
+| **样式系统**     | **Tailwind CSS v4**                    | 原子化 CSS，便于窗口宽度变化时的自适应布局                   |
 | **状态管理**     | **Pinia + TanStack Query (Vue Query)** | Pinia 管理客户端纯 UI 状态；Vue Query 负责 Tauri IPC 异步调用结果的本地缓存与乐观更新 |
 | **日期工具**     | **date-fns**                           | 轻量函数式日期处理库，按需引入无沉重负担                     |
 
@@ -29,11 +29,11 @@
 | 模块               | 选定方案                                 | 选型考量                                                     |
 | ------------------ | ---------------------------------------- | ------------------------------------------------------------ |
 | **桌面框架**       | **Tauri (v2)**                           | 相比 Electron 体积极小、内存占用低，Rust 底层性能极强        |
-| **本地持久化**     | **rusqlite + r2d2 + rusqlite_migration** | 原生 SQLite 驱动；连接池保障多线程读写并发；迁移工具支持后续无感升级数据库版本 |
+| **本地持久化**     | **rusqlite + r2d2 + r2d2_sqlite + rusqlite_migration** | 原生 SQLite 驱动；连接池保障多线程读写并发；迁移工具支持后续无感升级数据库版本 |
 | **网络通信**       | **reqwest (启用 rustls-tls)**            | 纯异步 HTTP 客户端，原生支持 WebDAV 自定义方法，规避 Windows 对外部 OpenSSL 动态库的依赖 |
 | **协议报文解析**   | **quick-xml**                            | 极速流式解析 WebDAV Multi-Status XML 响应                    |
-| **规则与数据处理** | **rrule crate + icalendar-rs**           | 纯 Rust 负责 iCalendar (RFC 5545) 数据的生成反序列化，并在后台线程完成复杂的重复日程展开计算 |
-| **系统级原生特性** | **Tauri 官方插件集**                     | @tauri-apps/plugin-notification（系统通知提醒）<br>@tauri-apps/plugin-tray（系统托盘后台常驻）<br>@tauri-apps/plugin-single-instance（单实例防多开）<br>@tauri-apps/plugin-autostart（开机自启） |
+| **规则与数据处理** | **rrule + icalendar + chrono + uuid**    | 纯 Rust 负责 iCalendar (RFC 5545) 生成，后台按可见窗口展开 RRULE；事件 UID 用 uuid v4 |
+| **系统级原生特性** | **Tauri 官方插件集 + 核心 tray-icon**    | plugin-notification（系统通知）<br>tauri `tray-icon` feature（托盘，无独立 plugin-tray）<br>plugin-single-instance（单实例）<br>plugin-autostart（开机自启，预览不默认 enable） |
 
 ------
 
@@ -57,4 +57,4 @@
 
 
 
-> 除上述已定技术栈以及我说明可确定的方案外，一切拿不定注意或有多个方案各有利弊的情况，都需要向我询问；除非我让你自由发挥的场景下，否则不可以做一些想当然的操作：如创建空白项目时，自己设想了一个软件名写上去，且没有告知我在软件名这里你自己做了主。
+> **未定先问**：除上述已定技术栈以及我说明可确定的方案外，一切拿不定主意或有多个方案各有利弊的情况，都需要向我询问。除非我让你自由发挥，否则不可以做想当然的操作（例如创建空白项目时自己设想了一个软件名写上去，且没有告知我在软件名这里你自己做了主）。细则见 `docs/details.md`「项目约定」。

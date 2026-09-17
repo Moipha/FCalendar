@@ -2,6 +2,14 @@
 
 问卷与后续确认中已经拍板的内容。未写入本节的事项仍须再问，不可自行补全。
 
+## 项目约定
+
+- **未定先问**：除已写入本文档 / `plan.md` 的技术栈，以及你明确说可以定的方案外，拿不定或有多方案利弊时必须先问。未让自由发挥时，不可想当然（例如擅自起软件名却不说明这里自己做了主）。
+- **文档同步**：有新的已定细节、你主动要求记录的 idea、或技术栈变动时，立刻写入对应文档。
+  - `docs/details.md`：已拍板的技术 / 产品细节（实现后也把实际约定补进去）
+  - `docs/idea.md`：只记你明确要求留下的构想，不自行发挥
+  - `docs/plan.md`：技术方案与技术栈矩阵
+
 ## 项目身份
 
 - 仓库根目录即最终工程根：前端与 Tauri/Rust 后端都在此目录下（`src/`、`src-tauri/`），不另拆仓库。
@@ -9,6 +17,7 @@
 - npm / Cargo 包名：`f-calendar`
 - Tauri identifier：`com.f.cal`
 - 包管理器：`pnpm`
+- 启动预览：`package.json` 的 `"tauri": "tauri dev"`，入口命令是 **`pnpm tauri`**（不要改成只转发 CLI，否则无子命令会直接退出）
 
 ## CalDAV
 
@@ -81,20 +90,30 @@
 - 任务区与月视图之间分割线可拖：缩到 320 仍显示；**同一次拖动左移距离超过按下时任务区宽度的 2/3** 则隐藏
 - 拖藏后按钮展开回到 **320**；点按钮收起则记住当时宽度，再展开恢复该宽度
 - 月视图左上：中文年月份；其右：文本「上个月 / 回到当前月 / 下个月」；Schedule-X 默认 header 隐藏
+- 顶栏拖动区不要盖住切月按钮和窗口三按钮（按钮组 `@pointerdown.stop`）
+- 无边框窗口在 Windows 上 `isMaximized()` 不可靠：最大化前记住 inner size + outer position；图标 `□` / `❐` 用本地状态；还原时 `unmaximize` 后再按记住的尺寸设回去。额外权限：`unmaximize`、`is-maximized`、`inner-size`、`outer-position`、`set-size`、`set-position`、`current-monitor`
+- 拖任务区分割线时禁止文本选中（`user-select: none` + 指针捕获）
+- 周一到周日单独一行写在月网格**上方**，不写进第一周日期格子
+- 月网格撑满顶栏与星期行之下的剩余高度
+- 切月以顶栏年月为唯一源，不要用 Schedule-X `range.start`（那是格子第一天，常落在上月尾巴）回写当前月
 - 一周从周一起；界面中文
 - 仅月网格；切换月份按可见网格窗口重新 `list_events`；不做拖拽改期
+- 带时刻事件交给 Schedule-X 时：`Temporal.Instant.from(含偏移 ISO)` → 系统 IANA 时区的 `ZonedDateTime`；全天用 `PlainDate`，结束日按库返回的**含当日**
+- Schedule-X 事件 `id` 只能是 `[A-Za-z0-9_-]`
 
 ## 预览 Tauri Commands
 
 - `list_calendars`（内部用，界面不展示切换）
-- `list_events(from, to, calendarId?)`：过滤软删，返回展开后的实例 + 主事件 id；实例 id = 主 id + 日期
+- `list_events(from, to, calendarId?)`：过滤软删，返回展开后的实例 + 主事件 id；实例 id = `{主事件id}_{去掉:-+:T 的 dtstart}`（不用冒号，以便 Schedule-X）
 - `get_event` / `create_event` / `update_event` / `delete_event`（软删 `deleted_at`）
 - 预览本地日历无 `account_id`，`dirty` 恒为 0；不写 `change_queue`
 
 ## 初始化时已定、与预览无冲突的宿主细节
 
-- 托盘：Tauri 2 核心 `tray-icon`，无独立 `plugin-tray`
-- Schedule-X 走当前官方 v3 + `temporal-polyfill`（对齐 peer `0.3.x`）；`date-fns` 仍安装供业务日期使用
-- shadcn-vue：按当时官方 CLI 默认（Tailwind v4；实际初始化为 `reka-nova` + Neutral）
+- 托盘：Tauri 2 核心 `tray-icon`（`tauri` crate feature），无独立 `plugin-tray`
+- Schedule-X 为官方 **v4**（`@schedule-x/calendar` / `theme-default` / `vue`）+ `temporal-polyfill@0.3.0`；`date-fns` 仍安装供业务日期使用
+- 前端日历时区：`Intl` 解析出的系统 IANA 名，传给 Schedule-X `timezone`
+- shadcn-vue：按当时官方 CLI 默认（Tailwind **v4**；实际初始化为 `reka-nova` + Neutral）
+- Rust 另用 `uuid`（v4）、`chrono`（带偏移时间 / 全天日期）；连接池为 `r2d2` + `r2d2_sqlite`
 - 开机自启插件只注册，不默认 enable
 - 单实例插件 callback 为空
