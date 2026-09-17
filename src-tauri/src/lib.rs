@@ -1,9 +1,18 @@
+mod db;
+
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            let database = db::Db::open(app).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, e)
+            })?;
+            app.manage(database);
+
             #[cfg(desktop)]
             {
                 use tauri::tray::TrayIconBuilder;
@@ -23,6 +32,7 @@ pub fn run() {
 
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![db::db_health])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
