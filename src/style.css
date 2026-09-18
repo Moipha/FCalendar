@@ -151,7 +151,8 @@ body.fc-task-dragging * {
 }
 
 .fc-month-day.fc-day-drop-target {
-  background: color-mix(in oklab, var(--primary) 14%, transparent) !important;
+  --fc-day-bg: color-mix(in oklab, var(--primary) 14%, var(--background));
+  background: var(--fc-day-bg) !important;
   outline: 2px solid color-mix(in oklab, var(--primary) 55%, transparent);
   outline-offset: -2px;
 }

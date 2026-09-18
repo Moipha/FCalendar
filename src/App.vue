@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, provide, ref } from "vue";
 
 import AppTitleBar from "@/components/AppTitleBar.vue";
+import DragTitlePreview from "@/components/DragTitlePreview.vue";
 import MonthCalendar from "@/components/MonthCalendar.vue";
 import TaskPane from "@/components/TaskPane.vue";
 import { listCalendars } from "@/api/calendars";
+import { DRAG_DROP_KEY, useDragDrop } from "@/composables/useDragDrop";
 import { useCalendarViewStore } from "@/stores/calendarView";
 import { useLayoutStore } from "@/stores/layout";
 import { useQuery } from "@tanstack/vue-query";
@@ -20,6 +22,9 @@ const { data: calendars } = useQuery({
 });
 
 const calendarId = computed(() => calendars.value?.[0]?.id ?? "");
+
+const dragDrop = useDragDrop(() => calendarId.value);
+provide(DRAG_DROP_KEY, dragDrop);
 
 function setResizingClass(active: boolean) {
   document.body.classList.toggle("is-resizing-panes", active);
@@ -101,5 +106,7 @@ function startDragging(event: PointerEvent) {
         <MonthCalendar v-if="calendarView.current === 'month'" />
       </div>
     </main>
+
+    <DragTitlePreview />
   </div>
 </template>

@@ -68,6 +68,9 @@ const visibleWeekEnd = ref(ROWS_VISIBLE + OVERSCAN * 2);
 
 let resizeObserver: ResizeObserver | null = null;
 let sliceRaf = 0;
+/** 切月 / 选日期等程序滚动期间，顶栏年月锁在目标月，避免 scroll-snap 途中反复改写。 */
+let programmaticMonthLock: MonthRef | null = null;
+let programmaticUnlockTimer = 0;
 
 const monthLabel = computed(() => formatMonthLabel(selectedYear.value, selectedMonth.value));
 
@@ -220,12 +223,42 @@ function nearestWeekScrollTop(scrollTop: number) {
 }
 
 function updateSelectedFromScrollTop(scrollTop: number) {
+  if (programmaticMonthLock) {
+    return;
+  }
   const nearest = nearestSnapMonth(scrollTop, weekHeight.value, weeks.value, snapMonths.value);
   if (!nearest) {
     return;
   }
   selectedYear.value = nearest.year;
   selectedMonth.value = nearest.month;
+}
+
+function lockMonthLabel(month: MonthRef) {
+  programmaticMonthLock = month;
+  selectedYear.value = month.year;
+  selectedMonth.value = month.month;
+  window.clearTimeout(programmaticUnlockTimer);
+  programmaticUnlockTimer = window.setTimeout(() => {
+    releaseMonthLabelLock();
+  }, 1500);
+}
+
+function releaseMonthLabelLock() {
+  programmaticMonthLock = null;
+  window.clearTimeout(programmaticUnlockTimer);
+  programmaticUnlockTimer = 0;
+  const viewport = scrollViewportRef.value;
+  if (viewport && weekHeight.value > 0) {
+    updateSelectedFromScrollTop(viewport.scrollTop);
+  }
+}
+
+function onProgrammaticScrollEnd() {
+  if (!programmaticMonthLock) {
+    return;
+  }
+  releaseMonthLabelLock();
 }
 
 async function ensureMonthInStrip(month: MonthRef) {
@@ -248,9 +281,12 @@ async function scrollToMonth(month: MonthRef, behavior: ScrollBehavior = "smooth
     return;
   }
 
+  lockMonthLabel(month);
   viewport.scrollTo({ top: targetTop, behavior });
-  updateSelectedFromScrollTop(targetTop);
   updateVisibleRange(targetTop);
+  if (behavior === "auto") {
+    releaseMonthLabelLock();
+  }
 }
 
 function maybeExtendStrip() {
@@ -382,6 +418,9 @@ function onDayClick(date: string) {
 }
 
 function onEventClick(eventId: string) {
+  if (taskDragStore.shouldSuppressEventClick()) {
+    return;
+  }
   void openEditDialog(eventId);
 }
 
@@ -418,15 +457,18 @@ onMounted(() => {
     updateViewportHeight();
   });
   resizeObserver.observe(viewport);
+  viewport.addEventListener("scrollend", onProgrammaticScrollEnd);
 
   void initializeScrollPosition();
 });
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
+  scrollViewportRef.value?.removeEventListener("scrollend", onProgrammaticScrollEnd);
   if (sliceRaf) {
     window.cancelAnimationFrame(sliceRaf);
   }
+  window.clearTimeout(programmaticUnlockTimer);
 });
 </script>
 

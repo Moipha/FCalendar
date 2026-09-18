@@ -4,10 +4,24 @@ export function localTimeZone() {
 
 export function toZonedDateTime(value: string) {
   const timeZone = localTimeZone();
-  if (value.includes("[")) {
-    return Temporal.ZonedDateTime.from(value);
+  const bracketMatch = value.match(/^(.*)\[([^\]]+)\]$/);
+  if (bracketMatch) {
+    const base = bracketMatch[1];
+    const tz = bracketMatch[2];
+    // 同时带偏移与 [时区名] 时 Temporal 无法解析，只保留偏移部分
+    if (base.includes("+") || base.endsWith("Z") || /-\d{2}:\d{2}$/.test(base)) {
+      return Temporal.Instant.from(base).toZonedDateTimeISO(timeZone);
+    }
+    return Temporal.ZonedDateTime.from(`${base}[${tz}]`);
   }
   return Temporal.Instant.from(value).toZonedDateTimeISO(timeZone);
+}
+
+/** 写入后端用的含偏移 ISO 字符串（不含 [时区名]）。 */
+export function toOffsetIsoString(zdt: Temporal.ZonedDateTime) {
+  const plain = zdt.toPlainDateTime();
+  const seconds = plain.toString({ smallestUnit: "second" });
+  return `${seconds}${zdt.offset}`;
 }
 
 export const weekdayLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];

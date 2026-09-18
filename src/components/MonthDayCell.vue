@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import {
   PopoverContent,
   PopoverPortal,
@@ -7,7 +7,9 @@ import {
   PopoverTrigger,
 } from "reka-ui";
 
+import { DRAG_DROP_KEY } from "@/composables/useDragDrop";
 import type { LunarDayInfo } from "@/lib/lunarDay";
+import { useTaskDragStore } from "@/stores/taskDrag";
 
 export type MonthDayEvent = {
   instanceId: string;
@@ -30,6 +32,10 @@ const emit = defineEmits<{
   eventClick: [eventId: string];
 }>();
 
+const dragDrop = inject(DRAG_DROP_KEY)!;
+const { startEventDrag } = dragDrop;
+
+const taskDragStore = useTaskDragStore();
 const overflowOpen = ref(false);
 
 const DAY_PADDING_Y = 8;
@@ -53,17 +59,43 @@ const overflowCount = computed(() =>
   Math.max(0, props.events.length - visibleEvents.value.length),
 );
 
+watch(
+  () => taskDragStore.active,
+  (active) => {
+    if (active) {
+      overflowOpen.value = false;
+    }
+  },
+);
+
 function onBlankClick() {
   emit("dayClick", props.date);
 }
 
 function onEventButtonClick(event: MouseEvent, eventId: string) {
   event.stopPropagation();
+  if (taskDragStore.shouldSuppressEventClick()) {
+    return;
+  }
   emit("eventClick", eventId);
+}
+
+function onEventPointerDown(pointerEvent: PointerEvent, eventId: string, title: string) {
+  startEventDrag(
+    {
+      eventId,
+      sourceDate: props.date,
+      title,
+    },
+    pointerEvent,
+  );
 }
 
 function onPopoverEventClick(eventId: string) {
   overflowOpen.value = false;
+  if (taskDragStore.shouldSuppressEventClick()) {
+    return;
+  }
   emit("eventClick", eventId);
 }
 </script>
@@ -107,8 +139,9 @@ function onPopoverEventClick(eventId: string) {
           v-for="event in visibleEvents"
           :key="event.instanceId"
           type="button"
-          class="fc-month-event block w-full truncate rounded px-1 py-0.5 text-left text-[11px] leading-tight"
+          class="fc-month-event relative block w-full truncate rounded py-0.5 pr-1 pl-2 text-left text-[11px] leading-tight"
           :class="{ 'fc-month-event--outside': outsideMonth }"
+          @pointerdown.stop="onEventPointerDown($event, event.eventId, event.summary)"
           @click="onEventButtonClick($event, event.eventId)"
         >
           {{ event.summary }}
@@ -129,7 +162,7 @@ function onPopoverEventClick(eventId: string) {
         </PopoverTrigger>
         <PopoverPortal>
           <PopoverContent
-            class="z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-md outline-none"
+            class="fc-month-event-popover z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-md outline-none"
             side="right"
             align="start"
             :side-offset="6"
@@ -141,7 +174,8 @@ function onPopoverEventClick(eventId: string) {
                 v-for="event in events"
                 :key="event.instanceId"
                 type="button"
-                class="fc-month-event block w-full truncate rounded px-1 py-0.5 text-left text-[11px] leading-tight"
+                class="fc-month-event relative block w-full truncate rounded py-0.5 pr-1 pl-2 text-left text-[11px] leading-tight"
+                @pointerdown.stop="onEventPointerDown($event, event.eventId, event.summary)"
                 @click="onPopoverEventClick(event.eventId)"
               >
                 {{ event.summary }}
@@ -182,13 +216,14 @@ function onPopoverEventClick(eventId: string) {
 
 <style scoped>
 .fc-month-day {
-  background: var(--background);
+  --fc-day-bg: var(--background);
+  background: var(--fc-day-bg);
   cursor: pointer;
   transition: background-color 0.12s ease;
 }
 
 .fc-month-day:hover {
-  background: color-mix(in oklab, var(--muted) 35%, var(--background));
+  --fc-day-bg: color-mix(in oklab, var(--muted) 35%, var(--background));
 }
 
 .fc-month-day--today {
@@ -196,12 +231,12 @@ function onPopoverEventClick(eventId: string) {
 }
 
 .fc-month-day--outside {
-  background: color-mix(in oklab, var(--muted) 55%, var(--background));
+  --fc-day-bg: color-mix(in oklab, var(--muted) 55%, var(--background));
   color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
 }
 
 .fc-month-day--outside:hover {
-  background: color-mix(in oklab, var(--muted) 70%, var(--background));
+  --fc-day-bg: color-mix(in oklab, var(--muted) 70%, var(--background));
 }
 
 .fc-month-day-mark--outside,
@@ -212,11 +247,31 @@ function onPopoverEventClick(eventId: string) {
 .fc-month-event {
   background: color-mix(in oklab, var(--primary) 16%, var(--background));
   color: var(--foreground);
+  cursor: grab;
+}
+
+.fc-month-event::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--fc-day-bg, var(--background)) 80%, transparent);
+}
+
+.fc-month-event:active {
+  cursor: grabbing;
 }
 
 .fc-month-event--outside {
   background: color-mix(in oklab, var(--muted-foreground) 14%, var(--background));
   color: color-mix(in oklab, var(--muted-foreground) 88%, transparent);
+}
+
+:deep(.fc-month-event-popover) {
+  --fc-day-bg: var(--popover);
 }
 
 .fc-jieqi--spring {
