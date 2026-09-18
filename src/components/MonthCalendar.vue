@@ -21,7 +21,9 @@ import {
   type SaveEventInput,
 } from "@/api/events";
 import EventDialog from "@/components/EventDialog.vue";
+import MonthDayCell from "@/components/MonthDayCell.vue";
 import { formatMonthLabel, toZonedDateTime, weekdayLabels } from "@/lib/datetime";
+import { buildLunarDayMap } from "@/lib/lunarDay";
 import {
   addMonths,
   buildWeekStrip,
@@ -40,7 +42,6 @@ const ROWS_VISIBLE = 6;
 const BUFFER_MONTHS = 6;
 const EXTEND_WEEKS = 13;
 const EXTEND_THRESHOLD_ROWS = 3;
-const MAX_EVENTS_PER_DAY = 8;
 
 const selectedYear = ref(new Date().getFullYear());
 const selectedMonth = ref(new Date().getMonth() + 1);
@@ -73,6 +74,14 @@ const weeks = computed(() => enumerateWeeks(stripStartMonday.value, stripWeekCou
 const snapMonths = computed(() => monthsIntersectingWeekStrip(weeks.value));
 
 const eventRange = computed(() => weekStripDateRange(weeks.value));
+
+const stripDateKeys = computed(() =>
+  weeks.value.flatMap((weekMonday) =>
+    enumerateDaysInWeek(weekMonday).map((day) => day.toString()),
+  ),
+);
+
+const lunarDayMap = computed(() => buildLunarDayMap(stripDateKeys.value));
 
 const { data: calendars } = useQuery({
   queryKey: ["calendars"],
@@ -141,13 +150,14 @@ function eventsForDate(date: string) {
   return eventsByDate.value.get(date) ?? [];
 }
 
-function visibleEventsForDate(date: string) {
-  return eventsForDate(date).slice(0, MAX_EVENTS_PER_DAY);
-}
-
-function overflowCount(date: string) {
-  const total = eventsForDate(date).length;
-  return total > MAX_EVENTS_PER_DAY ? total - MAX_EVENTS_PER_DAY : 0;
+function lunarForDate(date: string) {
+  return (
+    lunarDayMap.value.get(date) ?? {
+      lunarText: "",
+      cornerBadges: [],
+      workMark: null,
+    }
+  );
 }
 
 function snapScrollTopForMonth(month: MonthRef) {
@@ -294,8 +304,7 @@ function onDayClick(date: string) {
   void openCreateDialog(date);
 }
 
-function onEventClick(event: MouseEvent, eventId: string) {
-  event.stopPropagation();
+function onEventClick(eventId: string) {
   void openEditDialog(eventId);
 }
 
@@ -388,43 +397,20 @@ onBeforeUnmount(() => {
             class="fc-month-week grid grid-cols-7 border-b border-border"
             :style="{ height: weekHeight > 0 ? `${weekHeight}px` : undefined }"
           >
-            <button
+            <MonthDayCell
               v-for="day in enumerateDaysInWeek(weekMonday)"
               :key="day.toString()"
-              type="button"
-              class="fc-month-day flex min-h-0 flex-col border-r border-border p-1 text-left last:border-r-0"
-              :class="{
-                'fc-month-day--today': day.toString() === todayIso,
-                'fc-month-day--outside': isOutsideMonth(day),
-              }"
-              :data-date="day.toString()"
-              @click="onDayClick(day.toString())"
-            >
-              <span
-                class="mb-1 inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium"
-                :class="day.toString() === todayIso ? 'bg-primary text-primary-foreground' : ''"
-              >
-                {{ day.day }}
-              </span>
-              <div class="min-h-0 flex-1 space-y-0.5 overflow-hidden">
-                <button
-                  v-for="event in visibleEventsForDate(day.toString())"
-                  :key="event.instanceId"
-                  type="button"
-                  class="fc-month-event block w-full truncate rounded px-1 py-0.5 text-left text-[11px] leading-tight"
-                  :class="{ 'fc-month-event--outside': isOutsideMonth(day) }"
-                  @click="onEventClick($event, event.eventId)"
-                >
-                  {{ event.summary }}
-                </button>
-                <div
-                  v-if="overflowCount(day.toString()) > 0"
-                  class="truncate px-1 text-[10px] text-muted-foreground"
-                >
-                  +{{ overflowCount(day.toString()) }}
-                </div>
-              </div>
-            </button>
+              class="border-r border-border last:border-r-0"
+              :date="day.toString()"
+              :day-number="day.day"
+              :week-height="weekHeight"
+              :is-today="day.toString() === todayIso"
+              :outside-month="isOutsideMonth(day)"
+              :events="eventsForDate(day.toString())"
+              :lunar="lunarForDate(day.toString())"
+              @day-click="onDayClick"
+              @event-click="onEventClick"
+            />
           </div>
         </div>
       </div>
@@ -457,37 +443,5 @@ onBeforeUnmount(() => {
 .fc-month-week {
   scroll-snap-align: start;
   scroll-snap-stop: normal;
-}
-
-.fc-month-day {
-  background: var(--background);
-  transition: background-color 0.12s ease;
-}
-
-.fc-month-day:hover {
-  background: color-mix(in oklab, var(--muted) 35%, var(--background));
-}
-
-.fc-month-day--today {
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
-}
-
-.fc-month-day--outside {
-  background: color-mix(in oklab, var(--muted) 55%, var(--background));
-  color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
-}
-
-.fc-month-day--outside:hover {
-  background: color-mix(in oklab, var(--muted) 70%, var(--background));
-}
-
-.fc-month-event {
-  background: color-mix(in oklab, var(--primary) 16%, var(--background));
-  color: var(--foreground);
-}
-
-.fc-month-event--outside {
-  background: color-mix(in oklab, var(--muted-foreground) 14%, var(--background));
-  color: color-mix(in oklab, var(--muted-foreground) 88%, transparent);
 }
 </style>

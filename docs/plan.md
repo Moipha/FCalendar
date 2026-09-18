@@ -22,7 +22,7 @@
 | **UI 组件库**    | **shadcn-vue**                         | 基于无样式原语组件，源码直接集成进项目，高自由度定制桌面级视觉质感 |
 | **样式系统**     | **Tailwind CSS v4**                    | 原子化 CSS，便于窗口宽度变化时的自适应布局                   |
 | **状态管理**     | **Pinia + TanStack Query (Vue Query)** | Pinia 管理客户端纯 UI 状态；Vue Query 负责 Tauri IPC 异步调用结果的本地缓存与乐观更新 |
-| **日期工具**     | **date-fns**                           | 轻量函数式日期处理库，按需引入无沉重负担                     |
+| **日期工具**     | **date-fns** + **tyme4ts**             | `date-fns` 供业务日期；`tyme4ts` 离线提供预览月视图农历、节气、传统节日与国务院假/班 |
 
 ### 2.2 宿主与原生后端 (Tauri & Rust Core)
 
