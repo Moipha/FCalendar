@@ -58,7 +58,7 @@ export function useWindowControls() {
       try {
         await win.unmaximize();
       } catch {
-        // undecorated Windows windows often cannot unmaximize via OS state
+        // 无边框 Windows 窗口常无法通过系统状态正常 unmaximize
       }
       await applyRestoreBounds();
       isMaximized.value = false;

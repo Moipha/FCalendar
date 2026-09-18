@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ChevronLeft, ChevronRight, Circle } from "@lucide/vue";
-import { ScheduleXCalendar } from "@schedule-x/vue";
-import { createCalendar, createViewMonthGrid } from "@schedule-x/calendar";
-import "@schedule-x/theme-default/dist/index.css";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+} from "vue";
 
 import { listCalendars } from "@/api/calendars";
 import {
@@ -18,18 +21,29 @@ import {
   type SaveEventInput,
 } from "@/api/events";
 import EventDialog from "@/components/EventDialog.vue";
+import { formatMonthLabel, toZonedDateTime, weekdayLabels } from "@/lib/datetime";
+import {
+  addMonths,
+  buildWeekStrip,
+  enumerateDaysInWeek,
+  enumerateWeeks,
+  monthsIntersectingWeekStrip,
+  nearestSnapMonth,
+  snapIndexForMonth,
+  todayMonthRef,
+  weekStripDateRange,
+  type MonthRef,
+} from "@/lib/monthGrid";
 import { useTaskDragStore } from "@/stores/taskDrag";
-import { formatMonthLabel, getMonthGridRange, localTimeZone, toZonedDateTime, weekdayLabels } from "@/lib/datetime";
 
-const monthView = createViewMonthGrid();
+const ROWS_VISIBLE = 6;
+const BUFFER_MONTHS = 6;
+const EXTEND_WEEKS = 13;
+const EXTEND_THRESHOLD_ROWS = 3;
+const MAX_EVENTS_PER_DAY = 8;
+
 const selectedYear = ref(new Date().getFullYear());
 const selectedMonth = ref(new Date().getMonth() + 1);
-type CalendarController = {
-  datePickerState: { selectedDate: { value: Temporal.PlainDate } };
-  calendarState: { setView: (view: string, date: Temporal.PlainDate) => void };
-};
-
-const appSingleton = shallowRef<CalendarController | null>(null);
 
 const dialogOpen = ref(false);
 const dialogMode = ref<"create" | "edit">("create");
@@ -38,8 +52,27 @@ const editingEvent = ref<EventRow | null>(null);
 
 const queryClient = useQueryClient();
 const taskDragStore = useTaskDragStore();
+
+const scrollViewportRef = ref<HTMLElement | null>(null);
+const viewportHeight = ref(0);
+const stripStartMonday = ref<Temporal.PlainDate>(
+  buildWeekStrip(todayMonthRef(), BUFFER_MONTHS).firstMonday,
+);
+const stripWeekCount = ref(buildWeekStrip(todayMonthRef(), BUFFER_MONTHS).weeks.length);
+
+let resizeObserver: ResizeObserver | null = null;
+
 const monthLabel = computed(() => formatMonthLabel(selectedYear.value, selectedMonth.value));
-const range = computed(() => getMonthGridRange(selectedYear.value, selectedMonth.value));
+
+const weekHeight = computed(() =>
+  viewportHeight.value > 0 ? viewportHeight.value / ROWS_VISIBLE : 0,
+);
+
+const weeks = computed(() => enumerateWeeks(stripStartMonday.value, stripWeekCount.value));
+
+const snapMonths = computed(() => monthsIntersectingWeekStrip(weeks.value));
+
+const eventRange = computed(() => weekStripDateRange(weeks.value));
 
 const { data: calendars } = useQuery({
   queryKey: ["calendars"],
@@ -49,111 +82,192 @@ const { data: calendars } = useQuery({
 const calendarId = computed(() => calendars.value?.[0]?.id ?? "");
 
 const { data: instances } = useQuery({
-  queryKey: ["events", range, calendarId],
-  queryFn: () => listEvents(range.value.from, range.value.to, calendarId.value || undefined),
-  enabled: () => Boolean(calendarId.value),
+  queryKey: ["events", eventRange, calendarId],
+  queryFn: () => listEvents(eventRange.value.from, eventRange.value.to, calendarId.value || undefined),
+  enabled: () => Boolean(calendarId.value && eventRange.value.from && eventRange.value.to),
 });
 
-function selectedPlainDate() {
-  return Temporal.PlainDate.from(
-    `${selectedYear.value}-${`${selectedMonth.value}`.padStart(2, "0")}-01`,
-  );
-}
+type DayEvent = {
+  instanceId: string;
+  eventId: string;
+  summary: string;
+  allDay: boolean;
+};
 
-function scheduleXEventId(instanceId: string) {
-  return instanceId.replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-function toScheduleXEvent(instance: EventInstance) {
-  const id = scheduleXEventId(instance.instanceId);
+function datesForInstance(instance: EventInstance): string[] {
   if (instance.allDay) {
-    return {
-      id,
-      title: instance.summary,
-      start: Temporal.PlainDate.from(instance.dtstart),
-      end: Temporal.PlainDate.from(instance.dtend || instance.dtstart),
-      _eventId: instance.eventId,
-    };
+    const start = Temporal.PlainDate.from(instance.dtstart);
+    // list_events 返回的 dtend 为含当日（见 docs/details.md）
+    const endInclusive = Temporal.PlainDate.from(instance.dtend || instance.dtstart);
+    const dates: string[] = [];
+    let cursor = start;
+    while (Temporal.PlainDate.compare(cursor, endInclusive) <= 0) {
+      dates.push(cursor.toString());
+      cursor = cursor.add({ days: 1 });
+    }
+    return dates;
   }
-  return {
-    id,
-    title: instance.summary,
-    start: toZonedDateTime(instance.dtstart),
-    end: toZonedDateTime(instance.dtend),
-    _eventId: instance.eventId,
-  };
+  return [toZonedDateTime(instance.dtstart).toPlainDate().toString()];
 }
 
-function navigateCalendarTo(date: Temporal.PlainDate) {
-  const app = appSingleton.value;
-  if (!app) {
+const eventsByDate = computed(() => {
+  const map = new Map<string, DayEvent[]>();
+  for (const instance of instances.value ?? []) {
+    const item: DayEvent = {
+      instanceId: instance.instanceId,
+      eventId: instance.eventId,
+      summary: instance.summary,
+      allDay: instance.allDay,
+    };
+    for (const date of datesForInstance(instance)) {
+      const bucket = map.get(date);
+      if (bucket) {
+        bucket.push(item);
+      } else {
+        map.set(date, [item]);
+      }
+    }
+  }
+  return map;
+});
+
+const todayIso = computed(() => Temporal.Now.plainDateISO().toString());
+
+function isOutsideMonth(date: Temporal.PlainDate) {
+  return date.year !== selectedYear.value || date.month !== selectedMonth.value;
+}
+
+function eventsForDate(date: string) {
+  return eventsByDate.value.get(date) ?? [];
+}
+
+function visibleEventsForDate(date: string) {
+  return eventsForDate(date).slice(0, MAX_EVENTS_PER_DAY);
+}
+
+function overflowCount(date: string) {
+  const total = eventsForDate(date).length;
+  return total > MAX_EVENTS_PER_DAY ? total - MAX_EVENTS_PER_DAY : 0;
+}
+
+function snapScrollTopForMonth(month: MonthRef) {
+  const index = snapIndexForMonth(weeks.value, month.year, month.month);
+  if (index < 0) {
+    return null;
+  }
+  return index * weekHeight.value;
+}
+
+/** 对齐到最近整周行，避免视口出现半行。 */
+function nearestWeekScrollTop(scrollTop: number) {
+  if (weekHeight.value <= 0) {
+    return scrollTop;
+  }
+  const maxIndex = Math.max(0, weeks.value.length - ROWS_VISIBLE);
+  const index = Math.round(scrollTop / weekHeight.value);
+  return Math.min(maxIndex, Math.max(0, index)) * weekHeight.value;
+}
+
+function updateSelectedFromScrollTop(scrollTop: number) {
+  const nearest = nearestSnapMonth(scrollTop, weekHeight.value, weeks.value, snapMonths.value);
+  if (!nearest) {
     return;
   }
-  app.datePickerState.selectedDate.value = date;
-  app.calendarState.setView(monthView.name, date);
+  selectedYear.value = nearest.year;
+  selectedMonth.value = nearest.month;
 }
 
-const calendarApp = shallowRef(
-  createCalendar({
-    selectedDate: selectedPlainDate(),
-    views: [monthView],
-    defaultView: monthView.name,
-    firstDayOfWeek: 1,
-    locale: "zh-CN",
-    timezone: localTimeZone(),
-    monthGridOptions: {
-      nEventsPerDay: 8,
-    },
-    events: [],
-    callbacks: {
-      onRender($app) {
-        appSingleton.value = $app;
-        navigateCalendarTo(selectedPlainDate());
-      },
-      onClickDate(date) {
-        if (taskDragStore.shouldSuppressDateClick()) {
-          return;
-        }
-        openCreateDialog(date.toString());
-      },
-      onEventClick(calendarEvent) {
-        const eventId = calendarEvent._eventId as string | undefined;
-        if (eventId) {
-          void openEditDialog(eventId);
-        }
-      },
-    },
-  }),
-);
+async function ensureMonthInStrip(month: MonthRef) {
+  if (snapScrollTopForMonth(month) !== null) {
+    return;
+  }
+  const strip = buildWeekStrip(month, BUFFER_MONTHS);
+  stripStartMonday.value = strip.firstMonday;
+  stripWeekCount.value = strip.weeks.length;
+  await nextTick();
+}
 
-watch(
-  instances,
-  (value) => {
-    try {
-      calendarApp.value.events.set(value?.map(toScheduleXEvent) ?? []);
-    } catch (error) {
-      console.error("failed to render events", error);
-    }
-  },
-  { immediate: true },
-);
+async function scrollToMonth(month: MonthRef, behavior: ScrollBehavior = "smooth") {
+  await ensureMonthInStrip(month);
+  await nextTick();
+  const viewport = scrollViewportRef.value;
+  const targetTop = snapScrollTopForMonth(month);
+  if (!viewport || targetTop === null) {
+    return;
+  }
 
-onBeforeUnmount(() => {
-  calendarApp.value.destroy();
-});
+  viewport.scrollTo({ top: targetTop, behavior });
+  updateSelectedFromScrollTop(targetTop);
+}
+
+function maybeExtendStrip() {
+  const viewport = scrollViewportRef.value;
+  if (!viewport || weekHeight.value <= 0) {
+    return;
+  }
+
+  const scrollTop = viewport.scrollTop;
+  const maxScroll = viewport.scrollHeight - viewport.clientHeight;
+  const threshold = EXTEND_THRESHOLD_ROWS * weekHeight.value;
+
+  if (scrollTop < threshold) {
+    stripStartMonday.value = stripStartMonday.value.subtract({ days: EXTEND_WEEKS * 7 });
+    stripWeekCount.value += EXTEND_WEEKS;
+    nextTick(() => {
+      if (scrollViewportRef.value) {
+        scrollViewportRef.value.scrollTop = scrollTop + EXTEND_WEEKS * weekHeight.value;
+      }
+    });
+    return;
+  }
+
+  if (maxScroll - scrollTop < threshold) {
+    stripWeekCount.value += EXTEND_WEEKS;
+  }
+}
+
+function onScroll() {
+  const viewport = scrollViewportRef.value;
+  if (!viewport || weekHeight.value <= 0) {
+    return;
+  }
+
+  updateSelectedFromScrollTop(viewport.scrollTop);
+  maybeExtendStrip();
+}
+
+function updateViewportHeight() {
+  const viewport = scrollViewportRef.value;
+  if (!viewport) {
+    return;
+  }
+
+  const previousWeekHeight = weekHeight.value;
+  const previousScrollTop = viewport.scrollTop;
+  viewportHeight.value = viewport.clientHeight;
+
+  if (previousWeekHeight <= 0 || weekHeight.value <= 0) {
+    return;
+  }
+
+  const weekIndex = Math.round(previousScrollTop / previousWeekHeight);
+  viewport.scrollTop = nearestWeekScrollTop(weekIndex * weekHeight.value);
+  updateSelectedFromScrollTop(viewport.scrollTop);
+}
+
+async function initializeScrollPosition() {
+  await nextTick();
+  updateViewportHeight();
+  await scrollToMonth(todayMonthRef(), "auto");
+}
 
 function shiftMonth(delta: number) {
-  const next = selectedPlainDate().add({ months: delta });
-  selectedYear.value = next.year;
-  selectedMonth.value = next.month;
-  navigateCalendarTo(next);
+  const target = addMonths({ year: selectedYear.value, month: selectedMonth.value }, delta);
+  void scrollToMonth(target);
 }
 
 function goToday() {
-  const now = Temporal.Now.plainDateISO();
-  selectedYear.value = now.year;
-  selectedMonth.value = now.month;
-  navigateCalendarTo(Temporal.PlainDate.from(`${now.year}-${`${now.month}`.padStart(2, "0")}-01`));
+  void scrollToMonth(todayMonthRef());
 }
 
 async function openCreateDialog(date: string) {
@@ -171,6 +285,18 @@ async function openEditDialog(eventId: string) {
   dialogMode.value = "edit";
   dialogDate.value = editingEvent.value.dtstart.slice(0, 10);
   dialogOpen.value = true;
+}
+
+function onDayClick(date: string) {
+  if (taskDragStore.shouldSuppressDateClick()) {
+    return;
+  }
+  void openCreateDialog(date);
+}
+
+function onEventClick(event: MouseEvent, eventId: string) {
+  event.stopPropagation();
+  void openEditDialog(eventId);
 }
 
 async function invalidateEvents() {
@@ -195,6 +321,24 @@ async function handleDelete() {
   dialogOpen.value = false;
   await invalidateEvents();
 }
+
+onMounted(() => {
+  const viewport = scrollViewportRef.value;
+  if (!viewport) {
+    return;
+  }
+
+  resizeObserver = new ResizeObserver(() => {
+    updateViewportHeight();
+  });
+  resizeObserver.observe(viewport);
+
+  void initializeScrollPosition();
+});
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+});
 </script>
 
 <template>
@@ -226,14 +370,66 @@ async function handleDelete() {
         </button>
       </div>
     </Teleport>
+
     <div class="flex min-h-0 flex-1 flex-col p-3">
       <div class="grid shrink-0 grid-cols-7 border-b border-border text-center text-xs text-muted-foreground">
         <div v-for="label in weekdayLabels" :key="label" class="py-2">{{ label }}</div>
       </div>
-      <div class="sx-month-fill min-h-0 flex-1">
-        <ScheduleXCalendar :calendar-app="calendarApp" />
+
+      <div
+        ref="scrollViewportRef"
+        class="fc-month-scroll min-h-0 flex-1 overflow-y-auto"
+        @scroll="onScroll"
+      >
+        <div class="fc-month-weeks">
+          <div
+            v-for="weekMonday in weeks"
+            :key="weekMonday.toString()"
+            class="fc-month-week grid grid-cols-7 border-b border-border"
+            :style="{ height: weekHeight > 0 ? `${weekHeight}px` : undefined }"
+          >
+            <button
+              v-for="day in enumerateDaysInWeek(weekMonday)"
+              :key="day.toString()"
+              type="button"
+              class="fc-month-day flex min-h-0 flex-col border-r border-border p-1 text-left last:border-r-0"
+              :class="{
+                'fc-month-day--today': day.toString() === todayIso,
+                'fc-month-day--outside': isOutsideMonth(day),
+              }"
+              :data-date="day.toString()"
+              @click="onDayClick(day.toString())"
+            >
+              <span
+                class="mb-1 inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-medium"
+                :class="day.toString() === todayIso ? 'bg-primary text-primary-foreground' : ''"
+              >
+                {{ day.day }}
+              </span>
+              <div class="min-h-0 flex-1 space-y-0.5 overflow-hidden">
+                <button
+                  v-for="event in visibleEventsForDate(day.toString())"
+                  :key="event.instanceId"
+                  type="button"
+                  class="fc-month-event block w-full truncate rounded px-1 py-0.5 text-left text-[11px] leading-tight"
+                  :class="{ 'fc-month-event--outside': isOutsideMonth(day) }"
+                  @click="onEventClick($event, event.eventId)"
+                >
+                  {{ event.summary }}
+                </button>
+                <div
+                  v-if="overflowCount(day.toString()) > 0"
+                  class="truncate px-1 text-[10px] text-muted-foreground"
+                >
+                  +{{ overflowCount(day.toString()) }}
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
+
     <EventDialog
       :open="dialogOpen"
       :mode="dialogMode"
@@ -248,32 +444,50 @@ async function handleDelete() {
 </template>
 
 <style scoped>
-.sx-month-fill {
-  min-height: 0;
+.fc-month-scroll {
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
 }
 
-.sx-month-fill :deep(.sx-vue-calendar-wrapper),
-.sx-month-fill :deep(.sx__calendar-wrapper),
-.sx-month-fill :deep(.sx__calendar) {
-  height: 100%;
-  min-height: 0;
+.fc-month-weeks {
+  min-height: 100%;
 }
 
-:deep(.sx__calendar-header) {
-  display: none;
+.fc-month-week {
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
 }
 
-:deep(.sx__view-container) {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+.fc-month-day {
+  background: var(--background);
+  transition: background-color 0.12s ease;
 }
 
-:deep(.sx__month-grid-wrapper) {
-  height: 100%;
+.fc-month-day:hover {
+  background: color-mix(in oklab, var(--muted) 35%, var(--background));
 }
 
-:deep(.sx__month-grid-day__header-day-name) {
-  display: none;
+.fc-month-day--today {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
+}
+
+.fc-month-day--outside {
+  background: color-mix(in oklab, var(--muted) 55%, var(--background));
+  color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
+}
+
+.fc-month-day--outside:hover {
+  background: color-mix(in oklab, var(--muted) 70%, var(--background));
+}
+
+.fc-month-event {
+  background: color-mix(in oklab, var(--primary) 16%, var(--background));
+  color: var(--foreground);
+}
+
+.fc-month-event--outside {
+  background: color-mix(in oklab, var(--muted-foreground) 14%, var(--background));
+  color: color-mix(in oklab, var(--muted-foreground) 88%, transparent);
 }
 </style>

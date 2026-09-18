@@ -22,7 +22,7 @@ function findDropTarget(x: number, y: number): { kind: DropTargetKind; date: str
         return { kind: value, date: null };
       }
     }
-    const day = element.closest(".sx__month-grid-day[data-date]") as HTMLElement | null;
+    const day = element.closest(".fc-month-day[data-date]") as HTMLElement | null;
     if (day?.dataset.date) {
       return { kind: "calendar-day", date: day.dataset.date };
     }
@@ -40,7 +40,7 @@ function applyDropHighlight(kind: DropTargetKind, date: string | null) {
   clearDropHighlights();
   if (kind === "calendar-day" && date) {
     document
-      .querySelector(`.sx__month-grid-day[data-date="${date}"]`)
+      .querySelector(`.fc-month-day[data-date="${date}"]`)
       ?.classList.add(DAY_TARGET_CLASS);
     return;
   }

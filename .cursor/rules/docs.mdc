@@ -16,3 +16,9 @@ alwaysApply: true
 - `docs/details.md`：已拍板的技术 / 产品细节（实现后也把实际约定补进去）
 - `docs/idea.md`：只记用户明确要求留下的构想
 - `docs/plan.md`：技术方案与技术栈矩阵
+
+## 代码注释
+
+- 项目源码（`src/`、`src-tauri/src/`）中的注释使用**简体中文**
+- 只解释非显而易见的业务或技术细节；能自解释的代码不必加注释
+- 框架 / 工具生成的样板（如 `vite-env.d.ts` 的 reference、lock 文件）不在此列

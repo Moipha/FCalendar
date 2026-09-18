@@ -150,7 +150,7 @@ body.fc-task-dragging * {
   outline-offset: -2px;
 }
 
-.sx__month-grid-day.fc-day-drop-target {
+.fc-month-day.fc-day-drop-target {
   background: color-mix(in oklab, var(--primary) 14%, transparent) !important;
   outline: 2px solid color-mix(in oklab, var(--primary) 55%, transparent);
   outline-offset: -2px;
