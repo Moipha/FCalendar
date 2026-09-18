@@ -157,21 +157,33 @@ function workMarkFromLegal(solar: SolarDay): WorkMark {
   return legal.isWork() ? "work" : "off";
 }
 
+const lunarDayCache = new Map<string, LunarDayInfo>();
+
+export function clearLunarDayCache() {
+  lunarDayCache.clear();
+}
+
 export function getLunarDayInfo(dateIso: string): LunarDayInfo {
+  const cached = lunarDayCache.get(dateIso);
+  if (cached) {
+    return cached;
+  }
+
   const [year, month, day] = dateIso.split("-").map(Number);
   const solar = SolarDay.fromYmd(year, month, day);
 
-  return {
+  const info: LunarDayInfo = {
     lunarText: lunarDisplayText(solar),
     cornerBadges: pickCornerBadges(collectCornerCandidates(solar)),
     workMark: workMarkFromLegal(solar),
   };
+  lunarDayCache.set(dateIso, info);
+  return info;
 }
 
-export function buildLunarDayMap(dateKeys: string[]): Map<string, LunarDayInfo> {
-  const map = new Map<string, LunarDayInfo>();
+/** 确保给定日期键都已写入缓存（虚拟窗口挂载时调用）。 */
+export function ensureLunarDays(dateKeys: string[]) {
   for (const dateKey of dateKeys) {
-    map.set(dateKey, getLunarDayInfo(dateKey));
+    getLunarDayInfo(dateKey);
   }
-  return map;
 }

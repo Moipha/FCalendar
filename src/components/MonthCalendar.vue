@@ -23,7 +23,7 @@ import {
 import EventDialog from "@/components/EventDialog.vue";
 import MonthDayCell from "@/components/MonthDayCell.vue";
 import { formatMonthLabel, toZonedDateTime, weekdayLabels } from "@/lib/datetime";
-import { buildLunarDayMap } from "@/lib/lunarDay";
+import { clearLunarDayCache, ensureLunarDays, getLunarDayInfo } from "@/lib/lunarDay";
 import {
   addMonths,
   buildWeekStrip,
@@ -42,6 +42,7 @@ const ROWS_VISIBLE = 6;
 const BUFFER_MONTHS = 6;
 const EXTEND_WEEKS = 13;
 const EXTEND_THRESHOLD_ROWS = 3;
+const OVERSCAN = 4;
 
 const selectedYear = ref(new Date().getFullYear());
 const selectedMonth = ref(new Date().getMonth() + 1);
@@ -55,13 +56,18 @@ const queryClient = useQueryClient();
 const taskDragStore = useTaskDragStore();
 
 const scrollViewportRef = ref<HTMLElement | null>(null);
+const datePickerRef = ref<HTMLInputElement | null>(null);
 const viewportHeight = ref(0);
 const stripStartMonday = ref<Temporal.PlainDate>(
   buildWeekStrip(todayMonthRef(), BUFFER_MONTHS).firstMonday,
 );
 const stripWeekCount = ref(buildWeekStrip(todayMonthRef(), BUFFER_MONTHS).weeks.length);
 
+const visibleWeekStart = ref(0);
+const visibleWeekEnd = ref(ROWS_VISIBLE + OVERSCAN * 2);
+
 let resizeObserver: ResizeObserver | null = null;
+let sliceRaf = 0;
 
 const monthLabel = computed(() => formatMonthLabel(selectedYear.value, selectedMonth.value));
 
@@ -75,13 +81,15 @@ const snapMonths = computed(() => monthsIntersectingWeekStrip(weeks.value));
 
 const eventRange = computed(() => weekStripDateRange(weeks.value));
 
-const stripDateKeys = computed(() =>
-  weeks.value.flatMap((weekMonday) =>
-    enumerateDaysInWeek(weekMonday).map((day) => day.toString()),
-  ),
-);
+const stripTotalHeight = computed(() => weeks.value.length * weekHeight.value);
 
-const lunarDayMap = computed(() => buildLunarDayMap(stripDateKeys.value));
+const visibleWeeks = computed(() => {
+  const slice = weeks.value.slice(visibleWeekStart.value, visibleWeekEnd.value);
+  return slice.map((weekMonday, offset) => ({
+    weekMonday,
+    index: visibleWeekStart.value + offset,
+  }));
+});
 
 const { data: calendars } = useQuery({
   queryKey: ["calendars"],
@@ -151,13 +159,46 @@ function eventsForDate(date: string) {
 }
 
 function lunarForDate(date: string) {
-  return (
-    lunarDayMap.value.get(date) ?? {
-      lunarText: "",
-      cornerBadges: [],
-      workMark: null,
+  return getLunarDayInfo(date);
+}
+
+function ensureLunarForVisibleWeeks() {
+  const dateKeys: string[] = [];
+  for (let index = visibleWeekStart.value; index < visibleWeekEnd.value; index += 1) {
+    const weekMonday = weeks.value[index];
+    if (!weekMonday) {
+      continue;
     }
-  );
+    for (const day of enumerateDaysInWeek(weekMonday)) {
+      dateKeys.push(day.toString());
+    }
+  }
+  ensureLunarDays(dateKeys);
+}
+
+function updateVisibleRange(scrollTop: number) {
+  if (weekHeight.value <= 0 || weeks.value.length === 0) {
+    visibleWeekStart.value = 0;
+    visibleWeekEnd.value = Math.min(weeks.value.length, ROWS_VISIBLE + OVERSCAN * 2);
+    return;
+  }
+
+  const firstVisible = Math.floor(scrollTop / weekHeight.value);
+  const start = Math.max(0, firstVisible - OVERSCAN);
+  const end = Math.min(weeks.value.length, start + ROWS_VISIBLE + OVERSCAN * 2);
+  visibleWeekStart.value = start;
+  visibleWeekEnd.value = end;
+  ensureLunarForVisibleWeeks();
+}
+
+function scheduleVisibleRangeUpdate(scrollTop: number) {
+  if (sliceRaf) {
+    return;
+  }
+  sliceRaf = window.requestAnimationFrame(() => {
+    sliceRaf = 0;
+    updateVisibleRange(scrollTop);
+  });
 }
 
 function snapScrollTopForMonth(month: MonthRef) {
@@ -191,6 +232,7 @@ async function ensureMonthInStrip(month: MonthRef) {
   if (snapScrollTopForMonth(month) !== null) {
     return;
   }
+  clearLunarDayCache();
   const strip = buildWeekStrip(month, BUFFER_MONTHS);
   stripStartMonday.value = strip.firstMonday;
   stripWeekCount.value = strip.weeks.length;
@@ -208,6 +250,7 @@ async function scrollToMonth(month: MonthRef, behavior: ScrollBehavior = "smooth
 
   viewport.scrollTo({ top: targetTop, behavior });
   updateSelectedFromScrollTop(targetTop);
+  updateVisibleRange(targetTop);
 }
 
 function maybeExtendStrip() {
@@ -224,9 +267,12 @@ function maybeExtendStrip() {
     stripStartMonday.value = stripStartMonday.value.subtract({ days: EXTEND_WEEKS * 7 });
     stripWeekCount.value += EXTEND_WEEKS;
     nextTick(() => {
-      if (scrollViewportRef.value) {
-        scrollViewportRef.value.scrollTop = scrollTop + EXTEND_WEEKS * weekHeight.value;
+      const el = scrollViewportRef.value;
+      if (!el) {
+        return;
       }
+      el.scrollTop = scrollTop + EXTEND_WEEKS * weekHeight.value;
+      updateVisibleRange(el.scrollTop);
     });
     return;
   }
@@ -244,6 +290,7 @@ function onScroll() {
 
   updateSelectedFromScrollTop(viewport.scrollTop);
   maybeExtendStrip();
+  scheduleVisibleRangeUpdate(viewport.scrollTop);
 }
 
 function updateViewportHeight() {
@@ -257,12 +304,16 @@ function updateViewportHeight() {
   viewportHeight.value = viewport.clientHeight;
 
   if (previousWeekHeight <= 0 || weekHeight.value <= 0) {
+    if (weekHeight.value > 0) {
+      updateVisibleRange(viewport.scrollTop);
+    }
     return;
   }
 
   const weekIndex = Math.round(previousScrollTop / previousWeekHeight);
   viewport.scrollTop = nearestWeekScrollTop(weekIndex * weekHeight.value);
   updateSelectedFromScrollTop(viewport.scrollTop);
+  updateVisibleRange(viewport.scrollTop);
 }
 
 async function initializeScrollPosition() {
@@ -278,6 +329,32 @@ function shiftMonth(delta: number) {
 
 function goToday() {
   void scrollToMonth(todayMonthRef());
+}
+
+function selectedDateValue() {
+  return `${selectedYear.value}-${`${selectedMonth.value}`.padStart(2, "0")}-01`;
+}
+
+function openDatePicker() {
+  const input = datePickerRef.value;
+  if (!input) {
+    return;
+  }
+  input.value = selectedDateValue();
+  try {
+    input.showPicker();
+  } catch {
+    input.click();
+  }
+}
+
+function onDatePicked(event: Event) {
+  const value = (event.target as HTMLInputElement).value;
+  if (!value) {
+    return;
+  }
+  const date = Temporal.PlainDate.from(value);
+  void scrollToMonth({ year: date.year, month: date.month });
 }
 
 async function openCreateDialog(date: string) {
@@ -347,13 +424,32 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
+  if (sliceRaf) {
+    window.cancelAnimationFrame(sliceRaf);
+  }
 });
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <Teleport defer to="#app-title-leading">
-      <div class="text-base font-medium" data-tauri-drag-region>{{ monthLabel }}</div>
+      <button
+        type="button"
+        class="rounded-md px-1.5 py-0.5 text-base font-medium hover:bg-muted"
+        title="选择日期"
+        @pointerdown.stop
+        @click="openDatePicker"
+      >
+        {{ monthLabel }}
+      </button>
+      <input
+        ref="datePickerRef"
+        type="date"
+        class="pointer-events-none fixed h-px w-px opacity-0"
+        tabindex="-1"
+        :value="selectedDateValue()"
+        @change="onDatePicked"
+      />
       <div class="h-full min-w-4 flex-1" data-tauri-drag-region />
       <div class="flex items-center gap-1" @pointerdown.stop>
         <button
@@ -390,12 +486,29 @@ onBeforeUnmount(() => {
         class="fc-month-scroll min-h-0 flex-1 overflow-y-auto"
         @scroll="onScroll"
       >
-        <div class="fc-month-weeks">
+        <div
+          class="fc-month-weeks"
+          :style="{ height: weekHeight > 0 ? `${stripTotalHeight}px` : undefined }"
+        >
+          <!-- 全带子 snap 占位：保证 mandatory 吸附点覆盖整条带子，内容周仍虚拟挂载 -->
           <div
-            v-for="weekMonday in weeks"
+            v-for="(weekMonday, index) in weeks"
+            :key="`snap-${weekMonday.toString()}`"
+            class="fc-month-week-snap"
+            aria-hidden="true"
+            :style="{
+              height: weekHeight > 0 ? `${weekHeight}px` : undefined,
+              top: weekHeight > 0 ? `${index * weekHeight}px` : undefined,
+            }"
+          />
+          <div
+            v-for="{ weekMonday, index } in visibleWeeks"
             :key="weekMonday.toString()"
             class="fc-month-week grid grid-cols-7 border-b border-border"
-            :style="{ height: weekHeight > 0 ? `${weekHeight}px` : undefined }"
+            :style="{
+              height: weekHeight > 0 ? `${weekHeight}px` : undefined,
+              top: weekHeight > 0 ? `${index * weekHeight}px` : undefined,
+            }"
           >
             <MonthDayCell
               v-for="day in enumerateDaysInWeek(weekMonday)"
@@ -434,14 +547,30 @@ onBeforeUnmount(() => {
   overflow-anchor: none;
   overscroll-behavior: contain;
   scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+}
+
+.fc-month-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .fc-month-weeks {
+  position: relative;
   min-height: 100%;
 }
 
-.fc-month-week {
+.fc-month-week-snap {
+  position: absolute;
+  left: 0;
+  right: 0;
   scroll-snap-align: start;
   scroll-snap-stop: normal;
+  pointer-events: none;
+}
+
+.fc-month-week {
+  position: absolute;
+  left: 0;
+  right: 0;
 }
 </style>
