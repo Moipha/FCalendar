@@ -138,3 +138,20 @@ body.is-resizing-panes * {
   cursor: col-resize !important;
   user-select: none !important;
 }
+
+body.fc-task-dragging,
+body.fc-task-dragging * {
+  user-select: none !important;
+}
+
+[data-drop-zone].fc-drop-target {
+  background: color-mix(in oklab, var(--primary) 12%, transparent);
+  outline: 2px dashed color-mix(in oklab, var(--primary) 45%, transparent);
+  outline-offset: -2px;
+}
+
+.sx__month-grid-day.fc-day-drop-target {
+  background: color-mix(in oklab, var(--primary) 14%, transparent) !important;
+  outline: 2px solid color-mix(in oklab, var(--primary) 55%, transparent);
+  outline-offset: -2px;
+}

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronLeft, ChevronRight, Circle } from "@lucide/vue";
 import { ScheduleXCalendar } from "@schedule-x/vue";
 import { createCalendar, createViewMonthGrid } from "@schedule-x/calendar";
 import "@schedule-x/theme-default/dist/index.css";
@@ -17,7 +18,7 @@ import {
   type SaveEventInput,
 } from "@/api/events";
 import EventDialog from "@/components/EventDialog.vue";
-import { useWindowControls } from "@/composables/useWindowControls";
+import { useTaskDragStore } from "@/stores/taskDrag";
 import { formatMonthLabel, getMonthGridRange, localTimeZone, toZonedDateTime, weekdayLabels } from "@/lib/datetime";
 
 const monthView = createViewMonthGrid();
@@ -29,7 +30,6 @@ type CalendarController = {
 };
 
 const appSingleton = shallowRef<CalendarController | null>(null);
-const { isMaximized, minimizeWindow, toggleMaximize, closeWindow } = useWindowControls();
 
 const dialogOpen = ref(false);
 const dialogMode = ref<"create" | "edit">("create");
@@ -37,6 +37,7 @@ const dialogDate = ref<string>();
 const editingEvent = ref<EventRow | null>(null);
 
 const queryClient = useQueryClient();
+const taskDragStore = useTaskDragStore();
 const monthLabel = computed(() => formatMonthLabel(selectedYear.value, selectedMonth.value));
 const range = computed(() => getMonthGridRange(selectedYear.value, selectedMonth.value));
 
@@ -110,6 +111,9 @@ const calendarApp = shallowRef(
         navigateCalendarTo(selectedPlainDate());
       },
       onClickDate(date) {
+        if (taskDragStore.shouldSuppressDateClick()) {
+          return;
+        }
         openCreateDialog(date.toString());
       },
       onEventClick(calendarEvent) {
@@ -195,32 +199,33 @@ async function handleDelete() {
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex h-12 shrink-0 items-center border-b border-border px-4">
+    <Teleport defer to="#app-title-leading">
       <div class="text-base font-medium" data-tauri-drag-region>{{ monthLabel }}</div>
       <div class="h-full min-w-4 flex-1" data-tauri-drag-region />
-      <div class="ml-auto flex items-center gap-2" @pointerdown.stop>
-        <button class="rounded-md border border-border px-3 py-1 text-sm" @click="shiftMonth(-1)">
-          上个月
+      <div class="flex items-center gap-1" @pointerdown.stop>
+        <button
+          class="flex h-8 w-8 items-center justify-center rounded-md border border-border"
+          title="上个月"
+          @click="shiftMonth(-1)"
+        >
+          <ChevronLeft class="size-4" />
         </button>
-        <button class="rounded-md border border-border px-3 py-1 text-sm" @click="goToday">
-          回到当前月
+        <button
+          class="flex h-8 w-8 items-center justify-center rounded-md border border-border"
+          title="回到当前月"
+          @click="goToday"
+        >
+          <Circle class="size-3.5" />
         </button>
-        <button class="rounded-md border border-border px-3 py-1 text-sm" @click="shiftMonth(1)">
-          下个月
+        <button
+          class="flex h-8 w-8 items-center justify-center rounded-md border border-border"
+          title="下个月"
+          @click="shiftMonth(1)"
+        >
+          <ChevronRight class="size-4" />
         </button>
-        <div class="ml-3 flex items-center gap-1">
-          <button class="h-8 w-10 rounded-md border border-border text-sm" @click="minimizeWindow">—</button>
-          <button
-            class="h-8 w-10 rounded-md border border-border text-sm"
-            :title="isMaximized ? '还原' : '最大化'"
-            @click="toggleMaximize"
-          >
-            {{ isMaximized ? "❐" : "□" }}
-          </button>
-          <button class="h-8 w-10 rounded-md border border-border text-sm" @click="closeWindow">×</button>
-        </div>
       </div>
-    </div>
+    </Teleport>
     <div class="flex min-h-0 flex-1 flex-col p-3">
       <div class="grid shrink-0 grid-cols-7 border-b border-border text-center text-xs text-muted-foreground">
         <div v-for="label in weekdayLabels" :key="label" class="py-2">{{ label }}</div>

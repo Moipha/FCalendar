@@ -1,6 +1,7 @@
 mod calendars;
 mod events;
 mod ics;
+mod tasks;
 mod time;
 
 use r2d2::Pool;
@@ -12,6 +13,7 @@ use tauri::Manager;
 
 pub use calendars::CalendarRow;
 pub use events::{EventInstance, EventRow, SaveEventInput};
+pub use tasks::{CreateTaskInput, TaskRow, UpdateTaskInput};
 
 pub struct Db {
     pool: Pool<SqliteConnectionManager>,
@@ -79,7 +81,10 @@ fn migrate(path: &std::path::Path) -> Result<(), String> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|e| format!("enable foreign keys: {e}"))?;
 
-    let migrations = Migrations::new(vec![M::up(include_str!("sql/001_init.sql"))]);
+    let migrations = Migrations::new(vec![
+        M::up(include_str!("sql/001_init.sql")),
+        M::up(include_str!("sql/002_tasks.sql")),
+    ]);
     migrations
         .to_latest(&mut conn)
         .map_err(|e| format!("run db migrations: {e}"))?;
@@ -137,6 +142,30 @@ pub fn delete_event(db: tauri::State<Db>, id: String) -> Result<(), String> {
     db.with_conn(|conn| events::delete_event(conn, &id))
 }
 
+#[tauri::command]
+pub fn list_tasks(db: tauri::State<Db>) -> Result<Vec<TaskRow>, String> {
+    db.with_conn(tasks::list_tasks)
+}
+
+#[tauri::command]
+pub fn create_task(db: tauri::State<Db>, input: CreateTaskInput) -> Result<TaskRow, String> {
+    db.with_conn(|conn| tasks::create_task(conn, input))
+}
+
+#[tauri::command]
+pub fn update_task(
+    db: tauri::State<Db>,
+    id: String,
+    input: UpdateTaskInput,
+) -> Result<TaskRow, String> {
+    db.with_conn(|conn| tasks::update_task(conn, &id, input))
+}
+
+#[tauri::command]
+pub fn delete_task(db: tauri::State<Db>, id: String) -> Result<(), String> {
+    db.with_conn(|conn| tasks::delete_task(conn, &id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::migrate;
@@ -156,6 +185,7 @@ mod tests {
             "calendars",
             "events",
             "todos",
+            "tasks",
             "alarms",
             "memos",
             "change_queue",

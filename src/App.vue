@@ -1,11 +1,25 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 
+import AppTitleBar from "@/components/AppTitleBar.vue";
 import MonthCalendar from "@/components/MonthCalendar.vue";
+import TaskPane from "@/components/TaskPane.vue";
+import { listCalendars } from "@/api/calendars";
+import { useCalendarViewStore } from "@/stores/calendarView";
 import { useLayoutStore } from "@/stores/layout";
+import { useQuery } from "@tanstack/vue-query";
+import { computed } from "vue";
 
 const layout = useLayoutStore();
+const calendarView = useCalendarViewStore();
 const dragging = ref(false);
+
+const { data: calendars } = useQuery({
+  queryKey: ["calendars"],
+  queryFn: listCalendars,
+});
+
+const calendarId = computed(() => calendars.value?.[0]?.id ?? "");
 
 function setResizingClass(active: boolean) {
   document.body.classList.toggle("is-resizing-panes", active);
@@ -70,9 +84,9 @@ function startDragging(event: PointerEvent) {
     <section
       v-if="!layout.taskPaneHidden"
       :style="{ width: `${layout.taskPaneWidth}px` }"
-      class="shrink-0 border-r border-border bg-muted/10 p-4 text-sm text-muted-foreground"
+      class="shrink-0 border-r border-border bg-muted/10"
     >
-      任务区（预览占位）
+      <TaskPane :calendar-id="calendarId" />
     </section>
 
     <div
@@ -81,8 +95,11 @@ function startDragging(event: PointerEvent) {
       @pointerdown="startDragging"
     />
 
-    <main class="min-h-0 min-w-0 flex-1">
-      <MonthCalendar />
+    <main class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <AppTitleBar />
+      <div class="min-h-0 flex-1">
+        <MonthCalendar v-if="calendarView.current === 'month'" />
+      </div>
     </main>
   </div>
 </template>

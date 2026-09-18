@@ -40,6 +40,10 @@ pub fn run() {
             db::create_event,
             db::update_event,
             db::delete_event,
+            db::list_tasks,
+            db::create_task,
+            db::update_task,
+            db::delete_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
