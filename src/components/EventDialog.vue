@@ -2,7 +2,12 @@
 import { computed, reactive, watch } from "vue";
 
 import type { EventRow, SaveEventInput } from "@/api/events";
-import { defaultTimedRange, fromDatetimeLocalValue, toDatetimeLocalValue } from "@/lib/datetime";
+import {
+  datePart,
+  defaultTimedRange,
+  fromDatetimeLocalValue,
+  toDatetimeLocalValue,
+} from "@/lib/datetime";
 import {
   presetToRrule,
   recurrenceOptions,
@@ -35,41 +40,53 @@ const form = reactive({
 
 const title = computed(() => (props.mode === "create" ? "新建事件" : "编辑事件"));
 
+function fallbackDate() {
+  return props.initialDate ?? Temporal.Now.plainDateISO().toString();
+}
+
+function resetForm() {
+  if (props.mode === "edit" && props.event) {
+    form.summary = props.event.summary;
+    form.description = props.event.description ?? "";
+    form.allDay = props.event.allDay;
+    form.dtstart = props.event.allDay
+      ? datePart(props.event.dtstart)
+      : toDatetimeLocalValue(props.event.dtstart);
+    form.dtend = props.event.allDay
+      ? datePart(props.event.dtend ?? props.event.dtstart)
+      : toDatetimeLocalValue(props.event.dtend ?? props.event.dtstart);
+    form.recurrence = rruleToPreset(props.event.rrule);
+    return;
+  }
+  const date = fallbackDate();
+  const { dtstart, dtend } = defaultTimedRange(date);
+  form.summary = "";
+  form.description = "";
+  form.allDay = false;
+  form.dtstart = toDatetimeLocalValue(dtstart);
+  form.dtend = toDatetimeLocalValue(dtend);
+  form.recurrence = "never";
+}
+
 watch(
-  () => [props.open, props.mode, props.initialDate, props.event] as const,
-  () => {
-    if (!props.open) {
+  () => ({
+    open: props.open,
+    mode: props.mode,
+    eventId: props.event?.id ?? "",
+    initialDate: props.initialDate ?? "",
+  }),
+  (state) => {
+    if (!state.open) {
       return;
     }
-    if (props.mode === "edit" && props.event) {
-      form.summary = props.event.summary;
-      form.description = props.event.description ?? "";
-      form.allDay = props.event.allDay;
-      form.dtstart = props.event.allDay
-        ? props.event.dtstart
-        : toDatetimeLocalValue(props.event.dtstart);
-      form.dtend = props.event.allDay
-        ? (props.event.dtend ?? props.event.dtstart)
-        : toDatetimeLocalValue(props.event.dtend ?? props.event.dtstart);
-      form.recurrence = rruleToPreset(props.event.rrule);
-      return;
-    }
-    const date = props.initialDate ?? new Date().toISOString().slice(0, 10);
-    const { dtstart, dtend } = defaultTimedRange(date);
-    form.summary = "";
-    form.description = "";
-    form.allDay = false;
-    form.dtstart = toDatetimeLocalValue(dtstart);
-    form.dtend = toDatetimeLocalValue(dtend);
-    form.recurrence = "never";
+    resetForm();
   },
   { immediate: true },
 );
 
 function onAllDayChange(checked: boolean) {
+  const date = datePart(form.dtstart) || fallbackDate();
   form.allDay = checked;
-  const date =
-    form.dtstart.slice(0, 10) || props.initialDate || new Date().toISOString().slice(0, 10);
   if (checked) {
     form.dtstart = date;
     form.dtend = date;
@@ -90,8 +107,8 @@ function submit() {
     summary: form.summary.trim(),
     description: form.description.trim() || null,
     allDay: form.allDay,
-    dtstart: form.allDay ? form.dtstart.slice(0, 10) : fromDatetimeLocalValue(form.dtstart),
-    dtend: form.allDay ? form.dtend.slice(0, 10) : fromDatetimeLocalValue(form.dtend),
+    dtstart: form.allDay ? datePart(form.dtstart) : fromDatetimeLocalValue(form.dtstart),
+    dtend: form.allDay ? datePart(form.dtend) : fromDatetimeLocalValue(form.dtend),
     rrule: presetToRrule(form.recurrence),
   });
 }
@@ -128,16 +145,34 @@ function confirmDelete() {
           <label class="block space-y-1">
             <span class="text-sm text-muted-foreground">开始</span>
             <input
+              v-if="form.allDay"
+              :key="`all-day-start`"
               v-model="form.dtstart"
-              :type="form.allDay ? 'date' : 'datetime-local'"
+              type="date"
+              class="w-full rounded-md border border-input bg-background px-3 py-2"
+            />
+            <input
+              v-else
+              :key="`timed-start`"
+              v-model="form.dtstart"
+              type="datetime-local"
               class="w-full rounded-md border border-input bg-background px-3 py-2"
             />
           </label>
           <label class="block space-y-1">
             <span class="text-sm text-muted-foreground">结束</span>
             <input
+              v-if="form.allDay"
+              :key="`all-day-end`"
               v-model="form.dtend"
-              :type="form.allDay ? 'date' : 'datetime-local'"
+              type="date"
+              class="w-full rounded-md border border-input bg-background px-3 py-2"
+            />
+            <input
+              v-else
+              :key="`timed-end`"
+              v-model="form.dtend"
+              type="datetime-local"
               class="w-full rounded-md border border-input bg-background px-3 py-2"
             />
           </label>

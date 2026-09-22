@@ -77,10 +77,17 @@ export function fromDatetimeLocalValue(value: string) {
   return value.length === 16 ? `${value}:00${offset}` : `${value}${offset}`;
 }
 
+export function datePart(value: string) {
+  return value.slice(0, 10);
+}
+
 export function defaultTimedRange(date: string) {
   const now = new Date();
-  const dtstart = `${date}T${`${now.getHours()}`.padStart(2, "0")}:${`${now.getMinutes()}`.padStart(2, "0")}:00${localOffsetString(now)}`;
-  const end = new Date(now.getTime() + 60 * 60 * 1000);
-  const dtend = `${date}T${`${end.getHours()}`.padStart(2, "0")}:${`${end.getMinutes()}`.padStart(2, "0")}:00${localOffsetString(end)}`;
-  return { dtstart, dtend };
+  const [year, month, day] = date.split("-").map(Number);
+  const start = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), 0);
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  const pad = (n: number) => `${n}`.padStart(2, "0");
+  const format = (d: Date) =>
+    `${toDateString(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}:00${localOffsetString(d)}`;
+  return { dtstart: format(start), dtend: format(end) };
 }

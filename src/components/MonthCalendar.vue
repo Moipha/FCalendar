@@ -7,9 +7,18 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  shallowRef,
+  watch,
 } from "vue";
 
 import { listCalendars } from "@/api/calendars";
+import {
+  listDayColors,
+  setDayColor,
+  setDayColors,
+  type DayColorPreset,
+  type DayColorRow,
+} from "@/api/dayColors";
 import {
   createEvent,
   deleteEvent,
@@ -22,7 +31,11 @@ import {
 } from "@/api/events";
 import EventDialog from "@/components/EventDialog.vue";
 import MonthDayCell from "@/components/MonthDayCell.vue";
+import MonthDayContextMenu from "@/components/MonthDayContextMenu.vue";
 import { formatMonthLabel, toZonedDateTime, weekdayLabels } from "@/lib/datetime";
+import { normalizeDayColorPreset, type DayCellTint } from "@/lib/dayCellColors";
+import { dateRangeInclusiveInStrip } from "@/lib/daySelection";
+import { dayColorsQueryKey } from "@/lib/dayColorsQuery";
 import { clearLunarDayCache, ensureLunarDays, getLunarDayInfo } from "@/lib/lunarDay";
 import {
   addMonths,
@@ -51,6 +64,21 @@ const dialogOpen = ref(false);
 const dialogMode = ref<"create" | "edit">("create");
 const dialogDate = ref<string>();
 const editingEvent = ref<EventRow | null>(null);
+
+type DayContextMenuState = {
+  date: string;
+  x: number;
+  y: number;
+  showColorPicker: boolean;
+  mode: "single" | "batch";
+  batchDates: string[];
+};
+
+const dayContextMenu = ref<DayContextMenuState | null>(null);
+const dayContextMenuRef = ref<HTMLElement | null>(null);
+
+const selectedDayDates = shallowRef(new Set<string>());
+const selectionAnchorDate = ref<string | null>(null);
 
 const queryClient = useQueryClient();
 const taskDragStore = useTaskDragStore();
@@ -106,6 +134,100 @@ const { data: instances } = useQuery({
   queryFn: () => listEvents(eventRange.value.from, eventRange.value.to, calendarId.value || undefined),
   enabled: () => Boolean(calendarId.value && eventRange.value.from && eventRange.value.to),
 });
+
+const dayColorsKey = computed(() =>
+  dayColorsQueryKey(eventRange.value.from, eventRange.value.to),
+);
+
+const { data: dayColorRows } = useQuery({
+  queryKey: dayColorsKey,
+  queryFn: () => listDayColors(eventRange.value.from, eventRange.value.to),
+  enabled: () => Boolean(eventRange.value.from && eventRange.value.to),
+});
+
+/** 日格底色：与查询同步，改色时先本地更新以保证格子立刻变色。 */
+const dayColorByDate = shallowRef(new Map<string, DayColorPreset>());
+
+watch(
+  dayColorRows,
+  (rows) => {
+    const next = new Map<string, DayColorPreset>();
+    for (const row of rows ?? []) {
+      const preset = normalizeDayColorPreset(row.color);
+      if (preset) {
+        next.set(row.date, preset);
+      }
+    }
+    dayColorByDate.value = next;
+  },
+  { immediate: true },
+);
+
+function dayTintForDate(date: string): DayCellTint {
+  return dayColorByDate.value.get(date) ?? "default";
+}
+
+function patchDayColorsLocal(dates: string[], preset: DayColorPreset | null) {
+  const next = new Map(dayColorByDate.value);
+  for (const date of dates) {
+    if (preset) {
+      next.set(date, preset);
+    } else {
+      next.delete(date);
+    }
+  }
+  dayColorByDate.value = next;
+}
+
+function isDaySelected(date: string) {
+  return selectedDayDates.value.has(date);
+}
+
+function clearDaySelection() {
+  selectedDayDates.value = new Set();
+  selectionAnchorDate.value = null;
+}
+
+function setSelectedDays(dates: Iterable<string>) {
+  selectedDayDates.value = new Set(dates);
+}
+
+function rangeBetweenAnchorAnd(date: string): string[] {
+  const anchor = selectionAnchorDate.value;
+  if (!anchor) {
+    return [date];
+  }
+  return dateRangeInclusiveInStrip(weeks.value, anchor, date);
+}
+
+function applyDayColorsToQueryCache(dates: string[], preset: DayColorPreset | null) {
+  queryClient.setQueryData<DayColorRow[]>(dayColorsKey.value, (old) => {
+    const remove = new Set(dates);
+    const next = (old ?? []).filter((row) => !remove.has(row.date));
+    if (preset) {
+      for (const date of dates) {
+        next.push({ date, color: preset });
+      }
+      next.sort((a, b) => a.date.localeCompare(b.date));
+    }
+    return next;
+  });
+}
+
+async function persistDayColors(dates: string[], preset: DayColorPreset | null) {
+  if (dates.length === 0) {
+    return;
+  }
+  if (dates.length === 1) {
+    await setDayColor(dates[0], preset);
+    return;
+  }
+  await setDayColors(dates, preset);
+}
+
+function selectionHasAnyTint(dates: string[]) {
+  return dates.some((date) => dayTintForDate(date) !== "default");
+}
 
 type DayEvent = {
   instanceId: string;
@@ -324,6 +446,7 @@ function onScroll() {
     return;
   }
 
+  closeDayContextMenu();
   updateSelectedFromScrollTop(viewport.scrollTop);
   maybeExtendStrip();
   scheduleVisibleRangeUpdate(viewport.scrollTop);
@@ -410,10 +533,192 @@ async function openEditDialog(eventId: string) {
   dialogOpen.value = true;
 }
 
-function onDayClick(date: string) {
+function closeDayContextMenu(options?: { suppressClick?: boolean }) {
+  if (!dayContextMenu.value) {
+    return;
+  }
+  dayContextMenu.value = null;
+  if (options?.suppressClick) {
+    taskDragStore.suppressDateClick();
+    taskDragStore.suppressEventClick();
+  }
+}
+
+function onDayContextMenu(date: string, event: MouseEvent) {
+  if (taskDragStore.active) {
+    return;
+  }
+
+  const selected = selectedDayDates.value;
+  const isOnSelection = selected.has(date) && selected.size > 1;
+
+  if (!isOnSelection) {
+    clearDaySelection();
+  }
+
+  dayContextMenu.value = {
+    date,
+    x: event.clientX,
+    y: event.clientY,
+    showColorPicker: false,
+    mode: isOnSelection ? "batch" : "single",
+    batchDates: isOnSelection ? [...selected] : [date],
+  };
+}
+
+function onDayContextMenuCreate() {
+  const date = dayContextMenu.value?.date;
+  closeDayContextMenu();
+  if (date) {
+    void openCreateDialog(date);
+  }
+}
+
+function onDayContextMenuExpandColors() {
+  if (!dayContextMenu.value) {
+    return;
+  }
+  dayContextMenu.value = {
+    ...dayContextMenu.value,
+    showColorPicker: true,
+  };
+}
+
+function onDayContextMenuCollapseColors() {
+  if (!dayContextMenu.value?.showColorPicker) {
+    return;
+  }
+  dayContextMenu.value = {
+    ...dayContextMenu.value,
+    showColorPicker: false,
+  };
+}
+
+async function onDayContextMenuPickColor(tint: DayCellTint) {
+  const menu = dayContextMenu.value;
+  if (!menu) {
+    return;
+  }
+  const dates = menu.mode === "batch" ? menu.batchDates : [menu.date];
+  const preset = tint === "default" ? null : tint;
+
+  patchDayColorsLocal(dates, preset);
+  applyDayColorsToQueryCache(dates, preset);
+  closeDayContextMenu();
+
+  try {
+    await persistDayColors(dates, preset);
+  } catch {
+    await queryClient.invalidateQueries({ queryKey: ["dayColors"] });
+  }
+}
+
+async function onDayContextMenuClearColors() {
+  const menu = dayContextMenu.value;
+  if (!menu) {
+    return;
+  }
+  const dates = menu.mode === "batch" ? menu.batchDates : [menu.date];
+
+  patchDayColorsLocal(dates, null);
+  applyDayColorsToQueryCache(dates, null);
+  closeDayContextMenu();
+
+  try {
+    await persistDayColors(dates, null);
+  } catch {
+    await queryClient.invalidateQueries({ queryKey: ["dayColors"] });
+  }
+}
+
+const dayContextMenuShowClear = computed(() => {
+  const menu = dayContextMenu.value;
+  if (!menu) {
+    return false;
+  }
+  const dates = menu.mode === "batch" ? menu.batchDates : [menu.date];
+  return selectionHasAnyTint(dates);
+});
+
+function onDocumentPointerDown(event: PointerEvent) {
+  if (!dayContextMenu.value) {
+    return;
+  }
+  const target = event.target as Node | null;
+  if (target && dayContextMenuRef.value?.contains(target)) {
+    return;
+  }
+  closeDayContextMenu({ suppressClick: event.button === 0 });
+}
+
+function onDocumentKeyDown(event: KeyboardEvent) {
+  if (event.key !== "Escape") {
+    return;
+  }
+  if (dayContextMenu.value) {
+    event.preventDefault();
+    closeDayContextMenu();
+    return;
+  }
+  if (selectedDayDates.value.size > 0) {
+    event.preventDefault();
+    clearDaySelection();
+  }
+}
+
+function onDayClick(date: string, event: MouseEvent) {
   if (taskDragStore.shouldSuppressDateClick()) {
     return;
   }
+
+  const ctrl = event.ctrlKey;
+  const shift = event.shiftKey;
+
+  if (ctrl && shift) {
+    event.preventDefault();
+    const range = rangeBetweenAnchorAnd(date);
+    if (!selectionAnchorDate.value) {
+      setSelectedDays([date]);
+      selectionAnchorDate.value = date;
+      return;
+    }
+    const merged = new Set(selectedDayDates.value);
+    for (const d of range) {
+      merged.add(d);
+    }
+    setSelectedDays(merged);
+    return;
+  }
+
+  if (shift) {
+    event.preventDefault();
+    if (!selectionAnchorDate.value) {
+      setSelectedDays([date]);
+      selectionAnchorDate.value = date;
+      return;
+    }
+    setSelectedDays(rangeBetweenAnchorAnd(date));
+    return;
+  }
+
+  if (ctrl) {
+    event.preventDefault();
+    const next = new Set(selectedDayDates.value);
+    if (next.has(date)) {
+      next.delete(date);
+    } else {
+      next.add(date);
+    }
+    setSelectedDays(next);
+    selectionAnchorDate.value = date;
+    return;
+  }
+
+  if (selectedDayDates.value.size > 0) {
+    clearDaySelection();
+    return;
+  }
+
   void openCreateDialog(date);
 }
 
@@ -458,6 +763,8 @@ onMounted(() => {
   });
   resizeObserver.observe(viewport);
   viewport.addEventListener("scrollend", onProgrammaticScrollEnd);
+  document.addEventListener("pointerdown", onDocumentPointerDown, true);
+  document.addEventListener("keydown", onDocumentKeyDown);
 
   void initializeScrollPosition();
 });
@@ -465,11 +772,14 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   scrollViewportRef.value?.removeEventListener("scrollend", onProgrammaticScrollEnd);
+  document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+  document.removeEventListener("keydown", onDocumentKeyDown);
   if (sliceRaf) {
     window.cancelAnimationFrame(sliceRaf);
   }
   window.clearTimeout(programmaticUnlockTimer);
 });
+
 </script>
 
 <template>
@@ -563,13 +873,37 @@ onBeforeUnmount(() => {
               :outside-month="isOutsideMonth(day)"
               :events="eventsForDate(day.toString())"
               :lunar="lunarForDate(day.toString())"
+              :day-tint="dayTintForDate(day.toString())"
+              :selected="isDaySelected(day.toString())"
               @day-click="onDayClick"
               @event-click="onEventClick"
+              @day-context-menu="onDayContextMenu"
             />
           </div>
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="dayContextMenu"
+        ref="dayContextMenuRef"
+      >
+        <MonthDayContextMenu
+          :x="dayContextMenu.x"
+          :y="dayContextMenu.y"
+          :current-tint="dayTintForDate(dayContextMenu.date)"
+          :show-color-picker="dayContextMenu.showColorPicker"
+          :mode="dayContextMenu.mode"
+          :show-clear-color="dayContextMenuShowClear"
+          @create="onDayContextMenuCreate"
+          @clear-colors="onDayContextMenuClearColors"
+          @expand-colors="onDayContextMenuExpandColors"
+          @collapse-colors="onDayContextMenuCollapseColors"
+          @pick-color="onDayContextMenuPickColor"
+        />
+      </div>
+    </Teleport>
 
     <EventDialog
       :open="dialogOpen"

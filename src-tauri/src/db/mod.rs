@@ -1,4 +1,5 @@
 mod calendars;
+mod day_colors;
 mod events;
 mod ics;
 mod tasks;
@@ -12,6 +13,7 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 pub use calendars::CalendarRow;
+pub use day_colors::DayColorRow;
 pub use events::{EventInstance, EventRow, SaveEventInput};
 pub use tasks::{CreateTaskInput, TaskRow, UpdateTaskInput};
 
@@ -84,6 +86,7 @@ fn migrate(path: &std::path::Path) -> Result<(), String> {
     let migrations = Migrations::new(vec![
         M::up(include_str!("sql/001_init.sql")),
         M::up(include_str!("sql/002_tasks.sql")),
+        M::up(include_str!("sql/003_day_colors.sql")),
     ]);
     migrations
         .to_latest(&mut conn)
@@ -166,6 +169,35 @@ pub fn delete_task(db: tauri::State<Db>, id: String) -> Result<(), String> {
     db.with_conn(|conn| tasks::delete_task(conn, &id))
 }
 
+#[tauri::command]
+pub fn list_day_colors(
+    db: tauri::State<Db>,
+    from: String,
+    to: String,
+) -> Result<Vec<DayColorRow>, String> {
+    db.with_conn(|conn| day_colors::list_day_colors(conn, &from, &to))
+}
+
+#[tauri::command]
+pub fn set_day_color(
+    db: tauri::State<Db>,
+    date: String,
+    color: Option<String>,
+) -> Result<(), String> {
+    db.with_conn(|conn| {
+        day_colors::set_day_color(conn, &date, color.as_deref())
+    })
+}
+
+#[tauri::command]
+pub fn set_day_colors(
+    db: tauri::State<Db>,
+    dates: Vec<String>,
+    color: Option<String>,
+) -> Result<(), String> {
+    db.with_conn(|conn| day_colors::set_day_colors(conn, &dates, color.as_deref()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::migrate;
@@ -186,6 +218,7 @@ mod tests {
             "events",
             "todos",
             "tasks",
+            "day_colors",
             "alarms",
             "memos",
             "change_queue",

@@ -12,7 +12,9 @@ import WindowControls from "@/components/WindowControls.vue";
     />
     <div class="ml-3 flex items-center gap-2" @pointerdown.stop>
       <ViewSwitcher />
-      <WindowControls />
+      <div class="relative z-[200]">
+        <WindowControls />
+      </div>
     </div>
   </div>
 </template>

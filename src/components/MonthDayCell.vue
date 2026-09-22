@@ -8,6 +8,7 @@ import {
 } from "reka-ui";
 
 import { DRAG_DROP_KEY } from "@/composables/useDragDrop";
+import { DAY_CELL_TINT_FILL, DAY_CELL_TINT_HOVER, type DayCellTint } from "@/lib/dayCellColors";
 import type { LunarDayInfo } from "@/lib/lunarDay";
 import { useTaskDragStore } from "@/stores/taskDrag";
 
@@ -25,12 +26,19 @@ const props = defineProps<{
   outsideMonth: boolean;
   events: MonthDayEvent[];
   lunar: LunarDayInfo;
+  dayTint: DayCellTint;
+  selected: boolean;
 }>();
 
 const emit = defineEmits<{
-  dayClick: [date: string];
+  dayClick: [date: string, event: MouseEvent];
   eventClick: [eventId: string];
+  dayContextMenu: [date: string, event: MouseEvent];
 }>();
+
+function isSelectionModifier(event: MouseEvent | PointerEvent) {
+  return event.ctrlKey || event.shiftKey;
+}
 
 const dragDrop = inject(DRAG_DROP_KEY)!;
 const { startEventDrag } = dragDrop;
@@ -68,12 +76,24 @@ watch(
   },
 );
 
-function onBlankClick() {
-  emit("dayClick", props.date);
+function onBlankClick(event: MouseEvent) {
+  emit("dayClick", props.date, event);
+}
+
+function onMouseDown(event: MouseEvent) {
+  if (event.button !== 0 || !isSelectionModifier(event)) {
+    return;
+  }
+  event.preventDefault();
+  window.getSelection()?.removeAllRanges();
 }
 
 function onEventButtonClick(event: MouseEvent, eventId: string) {
   event.stopPropagation();
+  if (isSelectionModifier(event)) {
+    emit("dayClick", props.date, event);
+    return;
+  }
   if (taskDragStore.shouldSuppressEventClick()) {
     return;
   }
@@ -81,6 +101,9 @@ function onEventButtonClick(event: MouseEvent, eventId: string) {
 }
 
 function onEventPointerDown(pointerEvent: PointerEvent, eventId: string, title: string) {
+  if (isSelectionModifier(pointerEvent)) {
+    return;
+  }
   startEventDrag(
     {
       eventId,
@@ -91,24 +114,54 @@ function onEventPointerDown(pointerEvent: PointerEvent, eventId: string, title: 
   );
 }
 
-function onPopoverEventClick(eventId: string) {
+function onPopoverEventClick(event: MouseEvent, eventId: string) {
   overflowOpen.value = false;
+  if (isSelectionModifier(event)) {
+    emit("dayClick", props.date, event);
+    return;
+  }
   if (taskDragStore.shouldSuppressEventClick()) {
     return;
   }
   emit("eventClick", eventId);
 }
+
+function onOverflowClick(event: MouseEvent) {
+  event.stopPropagation();
+  if (isSelectionModifier(event)) {
+    emit("dayClick", props.date, event);
+  }
+}
+
+function onContextMenu(event: MouseEvent) {
+  event.preventDefault();
+  overflowOpen.value = false;
+  emit("dayContextMenu", props.date, event);
+}
+
+/** 行内自定义属性，优先级高于 scoped 类，避免底色被默认白盖掉。 */
+const daySurfaceStyle = computed(() => ({
+  "--fc-day-base": DAY_CELL_TINT_FILL[props.dayTint],
+  "--fc-day-base-hover": DAY_CELL_TINT_HOVER[props.dayTint],
+}));
 </script>
 
 <template>
   <div
-    class="fc-month-day relative flex min-h-0 flex-col p-1 text-left"
+    class="fc-month-day relative flex h-full min-h-0 w-full flex-col p-1 text-left"
     :class="{
       'fc-month-day--today': isToday,
       'fc-month-day--outside': outsideMonth,
+      'fc-month-day--tint-green': dayTint === 'green',
+      'fc-month-day--tint-red': dayTint === 'red',
+      'fc-month-day--selected': selected,
     }"
     :data-date="date"
+    :style="daySurfaceStyle"
+    @mousedown="onMouseDown"
+    @selectstart.prevent
     @click="onBlankClick"
+    @contextmenu="onContextMenu"
   >
     <div class="mb-1 flex shrink-0 items-start justify-between gap-1">
       <span
@@ -155,7 +208,7 @@ function onPopoverEventClick(eventId: string) {
           <button
             type="button"
             class="inline-flex size-4 items-center justify-center rounded-full border border-border bg-muted/70 text-[9px] font-medium text-muted-foreground"
-            @click.stop
+            @click="onOverflowClick"
           >
             +{{ overflowCount }}
           </button>
@@ -176,7 +229,7 @@ function onPopoverEventClick(eventId: string) {
                 type="button"
                 class="fc-month-event relative block w-full truncate rounded py-0.5 pr-1 pl-2 text-left text-[11px] leading-tight"
                 @pointerdown.stop="onEventPointerDown($event, event.eventId, event.summary)"
-                @click="onPopoverEventClick(event.eventId)"
+                @click="onPopoverEventClick($event, event.eventId)"
               >
                 {{ event.summary }}
               </button>
@@ -216,27 +269,51 @@ function onPopoverEventClick(eventId: string) {
 
 <style scoped>
 .fc-month-day {
-  --fc-day-bg: var(--background);
-  background: var(--fc-day-bg);
+  --fc-day-bg: var(--fc-day-base, var(--background));
+  background-color: var(--fc-day-bg);
   cursor: pointer;
+  user-select: none;
   transition: background-color 0.12s ease;
 }
 
 .fc-month-day:hover {
-  --fc-day-bg: color-mix(in oklab, var(--muted) 35%, var(--background));
+  --fc-day-bg: var(--fc-day-base-hover, var(--fc-day-base, var(--background)));
 }
 
 .fc-month-day--today {
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
 }
 
+.fc-month-day--selected::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, var(--primary) 50%, transparent 50%) 0 0 / 8px 2px repeat-x,
+    linear-gradient(90deg, var(--primary) 50%, transparent 50%) 0 100% / 8px 2px repeat-x,
+    linear-gradient(0deg, var(--primary) 50%, transparent 50%) 0 0 / 2px 8px repeat-y,
+    linear-gradient(0deg, var(--primary) 50%, transparent 50%) 100% 0 / 2px 8px repeat-y;
+  animation: fc-day-select-march 0.45s linear infinite;
+}
+
+@keyframes fc-day-select-march {
+  to {
+    background-position:
+      8px 0,
+      -8px 100%,
+      0 -8px,
+      100% 8px;
+  }
+}
+
 .fc-month-day--outside {
-  --fc-day-bg: color-mix(in oklab, var(--muted) 55%, var(--background));
+  --fc-day-bg: color-mix(in oklab, var(--muted) 55%, var(--fc-day-base, var(--background)));
   color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
 }
 
 .fc-month-day--outside:hover {
-  --fc-day-bg: color-mix(in oklab, var(--muted) 70%, var(--background));
+  --fc-day-bg: color-mix(in oklab, var(--muted) 70%, var(--fc-day-base-hover, var(--background)));
 }
 
 .fc-month-day-mark--outside,

@@ -44,6 +44,9 @@ pub fn run() {
             db::create_task,
             db::update_task,
             db::delete_task,
+            db::list_day_colors,
+            db::set_day_color,
+            db::set_day_colors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
