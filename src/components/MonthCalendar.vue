@@ -32,7 +32,7 @@ import {
 import EventDialog from "@/components/EventDialog.vue";
 import MonthDayCell from "@/components/MonthDayCell.vue";
 import MonthDayContextMenu from "@/components/MonthDayContextMenu.vue";
-import { formatMonthLabel, toZonedDateTime, weekdayLabels } from "@/lib/datetime";
+import { formatMonthLabel, toZonedDateTime, weekdayLabelsFor } from "@/lib/datetime";
 import { normalizeDayColorPreset, type DayCellTint } from "@/lib/dayCellColors";
 import { dateRangeInclusiveInStrip } from "@/lib/daySelection";
 import { dayColorsQueryKey } from "@/lib/dayColorsQuery";
@@ -49,6 +49,7 @@ import {
   weekStripDateRange,
   type MonthRef,
 } from "@/lib/monthGrid";
+import { useSettingsStore } from "@/stores/settings";
 import { useTaskDragStore } from "@/stores/taskDrag";
 
 const ROWS_VISIBLE = 6;
@@ -81,15 +82,22 @@ const selectedDayDates = shallowRef(new Set<string>());
 const selectionAnchorDate = ref<string | null>(null);
 
 const queryClient = useQueryClient();
+const settings = useSettingsStore();
 const taskDragStore = useTaskDragStore();
+
+const weekStart = computed(() => settings.weekStart);
+const weekdayLabels = computed(() => weekdayLabelsFor(weekStart.value));
+const scrollSnapWeeks = computed(() => settings.scrollSnapWeeks);
+
+function initialStrip() {
+  return buildWeekStrip(todayMonthRef(), BUFFER_MONTHS, settings.weekStart);
+}
 
 const scrollViewportRef = ref<HTMLElement | null>(null);
 const datePickerRef = ref<HTMLInputElement | null>(null);
 const viewportHeight = ref(0);
-const stripStartMonday = ref<Temporal.PlainDate>(
-  buildWeekStrip(todayMonthRef(), BUFFER_MONTHS).firstMonday,
-);
-const stripWeekCount = ref(buildWeekStrip(todayMonthRef(), BUFFER_MONTHS).weeks.length);
+const stripStartMonday = ref<Temporal.PlainDate>(initialStrip().firstMonday);
+const stripWeekCount = ref(initialStrip().weeks.length);
 
 const visibleWeekStart = ref(0);
 const visibleWeekEnd = ref(ROWS_VISIBLE + OVERSCAN * 2);
@@ -327,7 +335,7 @@ function scheduleVisibleRangeUpdate(scrollTop: number) {
 }
 
 function snapScrollTopForMonth(month: MonthRef) {
-  const index = snapIndexForMonth(weeks.value, month.year, month.month);
+  const index = snapIndexForMonth(weeks.value, month.year, month.month, weekStart.value);
   if (index < 0) {
     return null;
   }
@@ -348,7 +356,13 @@ function updateSelectedFromScrollTop(scrollTop: number) {
   if (programmaticMonthLock) {
     return;
   }
-  const nearest = nearestSnapMonth(scrollTop, weekHeight.value, weeks.value, snapMonths.value);
+  const nearest = nearestSnapMonth(
+    scrollTop,
+    weekHeight.value,
+    weeks.value,
+    snapMonths.value,
+    weekStart.value,
+  );
   if (!nearest) {
     return;
   }
@@ -388,11 +402,18 @@ async function ensureMonthInStrip(month: MonthRef) {
     return;
   }
   clearLunarDayCache();
-  const strip = buildWeekStrip(month, BUFFER_MONTHS);
+  const strip = buildWeekStrip(month, BUFFER_MONTHS, weekStart.value);
   stripStartMonday.value = strip.firstMonday;
   stripWeekCount.value = strip.weeks.length;
   await nextTick();
 }
+
+watch(weekStart, async () => {
+  clearLunarDayCache();
+  const month = { year: selectedYear.value, month: selectedMonth.value };
+  await ensureMonthInStrip(month);
+  await scrollToMonth(month, "auto");
+});
 
 async function scrollToMonth(month: MonthRef, behavior: ScrollBehavior = "smooth") {
   await ensureMonthInStrip(month);
@@ -836,6 +857,7 @@ onBeforeUnmount(() => {
       <div
         ref="scrollViewportRef"
         class="fc-month-scroll min-h-0 flex-1 overflow-y-auto"
+        :class="{ 'fc-month-scroll--snap': scrollSnapWeeks }"
         @scroll="onScroll"
       >
         <div
@@ -875,6 +897,7 @@ onBeforeUnmount(() => {
               :lunar="lunarForDate(day.toString())"
               :day-tint="dayTintForDate(day.toString())"
               :selected="isDaySelected(day.toString())"
+              :show-minor-festivals="settings.showMinorFestivals"
               @day-click="onDayClick"
               @event-click="onEventClick"
               @day-context-menu="onDayContextMenu"
@@ -922,8 +945,11 @@ onBeforeUnmount(() => {
 .fc-month-scroll {
   overflow-anchor: none;
   overscroll-behavior: contain;
-  scroll-snap-type: y mandatory;
   scrollbar-width: none;
+}
+
+.fc-month-scroll--snap {
+  scroll-snap-type: y mandatory;
 }
 
 .fc-month-scroll::-webkit-scrollbar {

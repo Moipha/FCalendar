@@ -1,5 +1,7 @@
 export type MonthRef = { year: number; month: number };
 
+export type WeekStart = "monday" | "sunday";
+
 export function plainDateFromParts(year: number, month: number, day = 1) {
   return Temporal.PlainDate.from({ year, month, day });
 }
@@ -8,40 +10,62 @@ export function toDateString(date: Temporal.PlainDate) {
   return date.toString();
 }
 
-/** 含 `date` 的那一周的周一（ISO 周，周一起算）。 */
-export function mondayOf(date: Temporal.PlainDate): Temporal.PlainDate {
-  return date.subtract({ days: date.dayOfWeek - 1 });
+/** 含 `date` 的那一周的首日（周一起或周日起）。 */
+export function weekStartOf(date: Temporal.PlainDate, weekStart: WeekStart): Temporal.PlainDate {
+  if (weekStart === "monday") {
+    return date.subtract({ days: date.dayOfWeek - 1 });
+  }
+  const offset = date.dayOfWeek % 7;
+  return date.subtract({ days: offset });
 }
 
 /** 该月至少占一天的自然周数。 */
-export function weeksSpannedByMonth(year: number, month: number): number {
+export function weeksSpannedByMonth(
+  year: number,
+  month: number,
+  weekStart: WeekStart,
+): number {
   const first = plainDateFromParts(year, month, 1);
   const last = first.with({ day: first.daysInMonth });
-  const gridStart = mondayOf(first);
-  const gridEnd = mondayOf(last);
+  const gridStart = weekStartOf(first, weekStart);
+  const gridEnd = weekStartOf(last, weekStart);
   return gridStart.until(gridEnd, { largestUnit: "weeks" }).weeks + 1;
 }
 
-/**
- * 月初卡点：含该月 1 号的那一周的周一。
- * 4 周月（28 天且 1 号为周一）锚点上移一周，以便切月后在 6 行视口内垂直居中。
- * 整周行由 CSS scroll-snap 对齐；不强制滚到此卡点。
- */
-export function snapWeekMonday(year: number, month: number): Temporal.PlainDate {
+function isFourWeekMonth(year: number, month: number, weekStart: WeekStart): boolean {
   const first = plainDateFromParts(year, month, 1);
-  let snap = mondayOf(first);
-  if (weeksSpannedByMonth(year, month) === 4) {
+  if (first.daysInMonth !== 28) {
+    return false;
+  }
+  if (weekStart === "monday") {
+    return first.dayOfWeek === 1;
+  }
+  return first.dayOfWeek === 7;
+}
+
+/**
+ * 月初卡点：含该月 1 号的那一周的首日。
+ * 4 周月（28 天且 1 号恰为周首）锚点上移一周，以便切月后在 6 行视口内垂直居中。
+ */
+export function snapWeekStart(
+  year: number,
+  month: number,
+  weekStart: WeekStart,
+): Temporal.PlainDate {
+  const first = plainDateFromParts(year, month, 1);
+  let snap = weekStartOf(first, weekStart);
+  if (isFourWeekMonth(year, month, weekStart)) {
     snap = snap.subtract({ days: 7 });
   }
   return snap;
 }
 
-export function enumerateWeeks(fromMonday: Temporal.PlainDate, count: number): Temporal.PlainDate[] {
-  return Array.from({ length: count }, (_, index) => fromMonday.add({ days: index * 7 }));
+export function enumerateWeeks(fromWeekStart: Temporal.PlainDate, count: number): Temporal.PlainDate[] {
+  return Array.from({ length: count }, (_, index) => fromWeekStart.add({ days: index * 7 }));
 }
 
-export function enumerateDaysInWeek(weekMonday: Temporal.PlainDate): Temporal.PlainDate[] {
-  return Array.from({ length: 7 }, (_, index) => weekMonday.add({ days: index }));
+export function enumerateDaysInWeek(weekStartDate: Temporal.PlainDate): Temporal.PlainDate[] {
+  return Array.from({ length: 7 }, (_, index) => weekStartDate.add({ days: index }));
 }
 
 export function addMonths(ref: MonthRef, delta: number): MonthRef {
@@ -53,10 +77,14 @@ export function monthRangeAround(center: MonthRef, radiusMonths: number): MonthR
   return Array.from({ length: radiusMonths * 2 + 1 }, (_, index) => addMonths(center, index - radiusMonths));
 }
 
-export function monthOwningSnap(weekMonday: Temporal.PlainDate, candidates: MonthRef[]): MonthRef | null {
-  const key = weekMonday.toString();
+export function monthOwningSnap(
+  weekStartDate: Temporal.PlainDate,
+  candidates: MonthRef[],
+  weekStart: WeekStart,
+): MonthRef | null {
+  const key = weekStartDate.toString();
   for (const candidate of candidates) {
-    if (snapWeekMonday(candidate.year, candidate.month).toString() === key) {
+    if (snapWeekStart(candidate.year, candidate.month, weekStart).toString() === key) {
       return candidate;
     }
   }
@@ -79,25 +107,31 @@ export function monthsIntersectingWeekStrip(weeks: Temporal.PlainDate[]): MonthR
   return months;
 }
 
-export function buildWeekStrip(center: MonthRef, bufferMonths: number) {
+export function buildWeekStrip(center: MonthRef, bufferMonths: number, weekStart: WeekStart) {
   const months = monthRangeAround(center, bufferMonths);
-  const snapMondays = months.map((month) => snapWeekMonday(month.year, month.month));
-  const firstMonday = snapMondays.reduce((earliest, current) =>
+  const snapWeeks = months.map((month) => snapWeekStart(month.year, month.month, weekStart));
+  const firstWeekStart = snapWeeks.reduce((earliest, current) =>
     Temporal.PlainDate.compare(current, earliest) < 0 ? current : earliest,
   );
-  const lastMonday = snapMondays.reduce((latest, current) =>
-    Temporal.PlainDate.compare(current, latest) > 0 ? current : latest,
+  const lastWeekStart = snapWeeks.reduce(
+    (latest, current) => (Temporal.PlainDate.compare(current, latest) > 0 ? current : latest),
+    snapWeeks[0],
   );
-  const weekCount = firstMonday.until(lastMonday, { largestUnit: "weeks" }).weeks + 1;
+  const weekCount = firstWeekStart.until(lastWeekStart, { largestUnit: "weeks" }).weeks + 1;
   return {
-    weeks: enumerateWeeks(firstMonday, weekCount),
+    weeks: enumerateWeeks(firstWeekStart, weekCount),
     months,
-    firstMonday,
+    firstMonday: firstWeekStart,
   };
 }
 
-export function snapIndexForMonth(weeks: Temporal.PlainDate[], year: number, month: number): number {
-  const snapKey = snapWeekMonday(year, month).toString();
+export function snapIndexForMonth(
+  weeks: Temporal.PlainDate[],
+  year: number,
+  month: number,
+  weekStart: WeekStart,
+): number {
+  const snapKey = snapWeekStart(year, month, weekStart).toString();
   return weeks.findIndex((week) => week.toString() === snapKey);
 }
 
@@ -106,6 +140,7 @@ export function nearestSnapMonth(
   weekHeight: number,
   weeks: Temporal.PlainDate[],
   snapMonths: MonthRef[],
+  weekStart: WeekStart,
 ): MonthRef | null {
   if (weekHeight <= 0 || weeks.length === 0 || snapMonths.length === 0) {
     return null;
@@ -115,7 +150,7 @@ export function nearestSnapMonth(
   let bestMonth: MonthRef | null = null;
 
   for (const month of snapMonths) {
-    const index = snapIndexForMonth(weeks, month.year, month.month);
+    const index = snapIndexForMonth(weeks, month.year, month.month, weekStart);
     if (index < 0) {
       continue;
     }

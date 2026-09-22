@@ -1,18 +1,23 @@
 <script setup lang="ts">
+import { CalendarClock, Inbox, Settings } from "@lucide/vue";
 import { onMounted, onUnmounted, provide, ref } from "vue";
 
 import AppTitleBar from "@/components/AppTitleBar.vue";
 import DragTitlePreview from "@/components/DragTitlePreview.vue";
 import MonthCalendar from "@/components/MonthCalendar.vue";
+import OverviewPane from "@/components/OverviewPane.vue";
+import SettingsDialog from "@/components/SettingsDialog.vue";
 import TaskPane from "@/components/TaskPane.vue";
 import { listCalendars } from "@/api/calendars";
 import { DRAG_DROP_KEY, useDragDrop } from "@/composables/useDragDrop";
 import { useCalendarViewStore } from "@/stores/calendarView";
 import { useLayoutStore } from "@/stores/layout";
+import { useSettingsStore } from "@/stores/settings";
 import { useQuery } from "@tanstack/vue-query";
 import { computed } from "vue";
 
 const layout = useLayoutStore();
+const settings = useSettingsStore();
 const calendarView = useCalendarViewStore();
 const dragging = ref(false);
 
@@ -48,6 +53,7 @@ function stopDragging() {
 }
 
 onMounted(() => {
+  settings.hydrate();
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", stopDragging);
   window.addEventListener("pointercancel", stopDragging);
@@ -69,6 +75,14 @@ function startDragging(event: PointerEvent) {
   window.getSelection()?.removeAllRanges();
   layout.beginResize(event.clientX);
 }
+
+function railButtonClass(page: "tasks" | "overview") {
+  const active = !layout.taskPaneHidden && layout.sidePanePage === page;
+  return [
+    "mx-3 mt-3 flex h-10 items-center justify-center rounded-md",
+    active ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted/60",
+  ];
+}
 </script>
 
 <template>
@@ -79,19 +93,49 @@ function startDragging(event: PointerEvent) {
       data-tauri-drag-region
     >
       <button
-        class="m-3 rounded-md border border-border px-2 py-2 text-xs"
-        @click="layout.toggleTaskPane()"
+        type="button"
+        title="任务区"
+        :class="railButtonClass('tasks')"
+        @pointerdown.stop
+        @click="layout.selectSidePage('tasks')"
       >
-        {{ layout.taskPaneHidden ? "展开任务区" : "收起任务区" }}
+        <Inbox class="size-5" />
+      </button>
+      <button
+        type="button"
+        title="概览"
+        :class="railButtonClass('overview')"
+        @pointerdown.stop
+        @click="layout.selectSidePage('overview')"
+      >
+        <CalendarClock class="size-5" />
+      </button>
+      <button
+        type="button"
+        title="设置"
+        class="mx-3 mt-auto mb-3 flex h-10 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60"
+        @pointerdown.stop
+        @click="settings.openDialog()"
+      >
+        <Settings class="size-5" />
       </button>
     </aside>
 
     <section
       v-if="!layout.taskPaneHidden"
       :style="{ width: `${layout.taskPaneWidth}px` }"
-      class="shrink-0 border-r border-border bg-muted/10"
+      class="flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-muted/10"
     >
-      <TaskPane :calendar-id="calendarId" />
+      <TaskPane
+        v-show="layout.sidePanePage === 'tasks'"
+        class="min-h-0 flex-1"
+        :calendar-id="calendarId"
+      />
+      <OverviewPane
+        v-show="layout.sidePanePage === 'overview'"
+        class="min-h-0 flex-1"
+        :calendar-id="calendarId"
+      />
     </section>
 
     <div
@@ -108,5 +152,6 @@ function startDragging(event: PointerEvent) {
     </main>
 
     <DragTitlePreview />
+    <SettingsDialog />
   </div>
 </template>

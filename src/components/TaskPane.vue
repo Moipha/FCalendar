@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus } from "@lucide/vue";
+import { ChevronDown, ChevronRight, Plus } from "@lucide/vue";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { computed, inject, nextTick, ref, watch } from "vue";
 
@@ -70,7 +70,7 @@ async function invalidateTasks() {
 
 async function startDraft() {
   if (layout.taskPaneHidden) {
-    layout.toggleTaskPane();
+    layout.openSidePage("tasks");
   }
   tasksExpanded.value = true;
   if (draftActive.value) {
@@ -163,10 +163,12 @@ function cancelInline() {
         <button
           type="button"
           class="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/30"
+          :title="tasksExpanded ? '收起' : '展开'"
           @click="tasksExpanded = !tasksExpanded"
         >
           <span>任务 ({{ taskItems.length }})</span>
-          <span>{{ tasksExpanded ? "收起" : "展开" }}</span>
+          <ChevronDown v-if="tasksExpanded" class="size-4" aria-hidden="true" />
+          <ChevronRight v-else class="size-4" aria-hidden="true" />
         </button>
         <div v-show="tasksExpanded" class="min-h-[2rem] transition-colors">
           <div v-if="draftActive" class="border-b border-border/60 px-3 py-2" @keydown.esc.prevent="cancelDraft">
@@ -200,10 +202,12 @@ function cancelInline() {
         <button
           type="button"
           class="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/30"
+          :title="stampsExpanded ? '收起' : '展开'"
           @click="stampsExpanded = !stampsExpanded"
         >
           <span>图章 ({{ stampItems.length }})</span>
-          <span>{{ stampsExpanded ? "收起" : "展开" }}</span>
+          <ChevronDown v-if="stampsExpanded" class="size-4" aria-hidden="true" />
+          <ChevronRight v-else class="size-4" aria-hidden="true" />
         </button>
         <div v-show="stampsExpanded" class="min-h-[2rem] transition-colors">
           <TaskListItem

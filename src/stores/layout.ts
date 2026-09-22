@@ -4,6 +4,8 @@ const MIN_TASK_PANE = 320;
 const DEFAULT_TASK_PANE = 360;
 const RAIL_WIDTH = 80;
 
+export type SidePanePage = "tasks" | "overview";
+
 export const useLayoutStore = defineStore("layout", {
   state: () => ({
     railWidth: RAIL_WIDTH,
@@ -13,6 +15,7 @@ export const useLayoutStore = defineStore("layout", {
     dragStartWidth: DEFAULT_TASK_PANE,
     dragStartX: 0,
     hideTriggeredByDrag: false,
+    sidePanePage: "tasks" as SidePanePage,
   }),
   getters: {
     minTaskPane: () => MIN_TASK_PANE,
@@ -49,6 +52,19 @@ export const useLayoutStore = defineStore("layout", {
       this.taskPaneWidthBeforeHide = this.taskPaneWidth;
       this.taskPaneHidden = true;
       this.hideTriggeredByDrag = false;
+    },
+    openSidePage(page: SidePanePage) {
+      this.sidePanePage = page;
+      if (this.taskPaneHidden) {
+        this.toggleTaskPane();
+      }
+    },
+    selectSidePage(page: SidePanePage) {
+      if (!this.taskPaneHidden && this.sidePanePage === page) {
+        this.toggleTaskPane();
+        return;
+      }
+      this.openSidePage(page);
     },
   },
 });

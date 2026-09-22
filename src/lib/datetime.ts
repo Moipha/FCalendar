@@ -24,7 +24,12 @@ export function toOffsetIsoString(zdt: Temporal.ZonedDateTime) {
   return `${seconds}${zdt.offset}`;
 }
 
-export const weekdayLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+const WEEKDAY_LABELS_MON = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+const WEEKDAY_LABELS_SUN = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+export function weekdayLabelsFor(weekStart: "monday" | "sunday") {
+  return weekStart === "sunday" ? WEEKDAY_LABELS_SUN : WEEKDAY_LABELS_MON;
+}
 
 export function formatMonthLabel(year: number, month: number) {
   return `${year}年${month}月`;

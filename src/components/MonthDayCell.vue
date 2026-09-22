@@ -28,7 +28,15 @@ const props = defineProps<{
   lunar: LunarDayInfo;
   dayTint: DayCellTint;
   selected: boolean;
+  showMinorFestivals: boolean;
 }>();
+
+const cornerBadges = computed(() => {
+  if (props.showMinorFestivals) {
+    return props.lunar.cornerBadges;
+  }
+  return props.lunar.cornerBadges.filter((badge) => badge.kind !== "minor");
+});
 
 const emit = defineEmits<{
   dayClick: [date: string, event: MouseEvent];
@@ -140,10 +148,17 @@ function onContextMenu(event: MouseEvent) {
 }
 
 /** 行内自定义属性，优先级高于 scoped 类，避免底色被默认白盖掉。 */
-const daySurfaceStyle = computed(() => ({
-  "--fc-day-base": DAY_CELL_TINT_FILL[props.dayTint],
-  "--fc-day-base-hover": DAY_CELL_TINT_HOVER[props.dayTint],
-}));
+const daySurfaceStyle = computed(() => {
+  const shadows: string[] = [];
+  if (props.isToday) {
+    shadows.push("inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent)");
+  }
+  return {
+    "--fc-day-base": DAY_CELL_TINT_FILL[props.dayTint],
+    "--fc-day-base-hover": DAY_CELL_TINT_HOVER[props.dayTint],
+    ...(shadows.length > 0 ? { boxShadow: shadows.join(", ") } : {}),
+  };
+});
 </script>
 
 <template>
@@ -248,11 +263,12 @@ const daySurfaceStyle = computed(() => ({
       </span>
       <div class="flex min-w-0 shrink items-center justify-end gap-1">
         <span
-          v-for="badge in lunar.cornerBadges"
+          v-for="badge in cornerBadges"
           :key="badge.text"
           class="truncate"
           :class="{
-            'font-semibold': ['major', 'jieqi'].includes(badge.kind) && !outsideMonth,
+            'font-semibold text-primary': badge.kind === 'major' && !outsideMonth,
+            'font-semibold': badge.kind === 'jieqi' && !outsideMonth,
             'fc-jieqi--spring': badge.kind === 'jieqi' && badge.season === 'spring' && !outsideMonth,
             'fc-jieqi--summer': badge.kind === 'jieqi' && badge.season === 'summer' && !outsideMonth,
             'fc-jieqi--autumn': badge.kind === 'jieqi' && badge.season === 'autumn' && !outsideMonth,
@@ -276,12 +292,8 @@ const daySurfaceStyle = computed(() => ({
   transition: background-color 0.12s ease;
 }
 
-.fc-month-day:hover {
+.fc-month-day:hover:not(.fc-month-day--outside) {
   --fc-day-bg: var(--fc-day-base-hover, var(--fc-day-base, var(--background)));
-}
-
-.fc-month-day--today {
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
 }
 
 .fc-month-day--selected::after {
@@ -310,10 +322,6 @@ const daySurfaceStyle = computed(() => ({
 .fc-month-day--outside {
   --fc-day-bg: color-mix(in oklab, var(--muted) 55%, var(--fc-day-base, var(--background)));
   color: color-mix(in oklab, var(--muted-foreground) 85%, transparent);
-}
-
-.fc-month-day--outside:hover {
-  --fc-day-bg: color-mix(in oklab, var(--muted) 70%, var(--fc-day-base-hover, var(--background)));
 }
 
 .fc-month-day-mark--outside,
@@ -352,18 +360,18 @@ const daySurfaceStyle = computed(() => ({
 }
 
 .fc-jieqi--spring {
-  color: #d4537e;
+  color: var(--fc-jieqi-spring);
 }
 
 .fc-jieqi--summer {
-  color: #1f6b4a;
+  color: var(--fc-jieqi-summer);
 }
 
 .fc-jieqi--autumn {
-  color: #c47a12;
+  color: var(--fc-jieqi-autumn);
 }
 
 .fc-jieqi--winter {
-  color: #2f7ae5;
+  color: var(--fc-jieqi-winter);
 }
 </style>
