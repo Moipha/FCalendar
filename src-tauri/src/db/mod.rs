@@ -1,9 +1,15 @@
-mod calendars;
-mod day_colors;
-mod events;
+pub(crate) mod accounts;
+pub(crate) mod app_state;
+pub(crate) mod calendars;
+pub(crate) mod day_colors;
+pub(crate) mod events;
 mod ics;
-mod tasks;
-mod time;
+pub(crate) mod ics_patch;
+pub(crate) mod queue;
+mod sqlite_util;
+pub(crate) mod tasks;
+pub(crate) mod time;
+pub(crate) use time::now_millis as now_millis_pub;
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -12,6 +18,9 @@ use serde::Serialize;
 use std::path::PathBuf;
 use tauri::Manager;
 
+pub use accounts::{
+    disconnect_account, get_account_status, persist_connect, persist_rediscover, AccountStatus,
+};
 pub use calendars::CalendarRow;
 pub use day_colors::DayColorRow;
 pub use events::{EventInstance, EventRow, SaveEventInput};
@@ -53,7 +62,11 @@ impl Db {
             .map_err(|e| format!("create db pool: {e}"))?;
 
         let db = Self { pool, path };
-        db.with_conn(|conn| calendars::seed_default_calendar(conn))?;
+        db.with_conn(|conn| {
+            calendars::seed_default_calendar(conn)?;
+            let _ = app_state::current_calendar_id(conn)?;
+            Ok(())
+        })?;
         Ok(db)
     }
 
@@ -87,6 +100,7 @@ fn migrate(path: &std::path::Path) -> Result<(), String> {
         M::up(include_str!("sql/001_init.sql")),
         M::up(include_str!("sql/002_tasks.sql")),
         M::up(include_str!("sql/003_day_colors.sql")),
+        M::up(include_str!("sql/004_sync.sql")),
     ]);
     migrations
         .to_latest(&mut conn)
@@ -146,8 +160,11 @@ pub fn delete_event(db: tauri::State<Db>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn list_tasks(db: tauri::State<Db>) -> Result<Vec<TaskRow>, String> {
-    db.with_conn(tasks::list_tasks)
+pub fn list_tasks(
+    db: tauri::State<Db>,
+    calendar_id: Option<String>,
+) -> Result<Vec<TaskRow>, String> {
+    db.with_conn(|conn| tasks::list_tasks(conn, calendar_id.as_deref()))
 }
 
 #[tauri::command]
@@ -174,8 +191,9 @@ pub fn list_day_colors(
     db: tauri::State<Db>,
     from: String,
     to: String,
+    calendar_id: Option<String>,
 ) -> Result<Vec<DayColorRow>, String> {
-    db.with_conn(|conn| day_colors::list_day_colors(conn, &from, &to))
+    db.with_conn(|conn| day_colors::list_day_colors(conn, &from, &to, calendar_id.as_deref()))
 }
 
 #[tauri::command]
@@ -183,9 +201,10 @@ pub fn set_day_color(
     db: tauri::State<Db>,
     date: String,
     color: Option<String>,
+    calendar_id: Option<String>,
 ) -> Result<(), String> {
     db.with_conn(|conn| {
-        day_colors::set_day_color(conn, &date, color.as_deref())
+        day_colors::set_day_color(conn, &date, color.as_deref(), calendar_id.as_deref())
     })
 }
 
@@ -194,8 +213,70 @@ pub fn set_day_colors(
     db: tauri::State<Db>,
     dates: Vec<String>,
     color: Option<String>,
+    calendar_id: Option<String>,
 ) -> Result<(), String> {
-    db.with_conn(|conn| day_colors::set_day_colors(conn, &dates, color.as_deref()))
+    db.with_conn(|conn| {
+        day_colors::set_day_colors(conn, &dates, color.as_deref(), calendar_id.as_deref())
+    })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectAccountInput {
+    pub server_url: String,
+    pub username: String,
+    pub password: String,
+}
+
+#[tauri::command]
+pub fn get_account(db: tauri::State<'_, Db>) -> Result<AccountStatus, String> {
+    db.with_conn(get_account_status)
+}
+
+#[tauri::command]
+pub async fn connect_account(
+    db: tauri::State<'_, Db>,
+    input: ConnectAccountInput,
+) -> Result<AccountStatus, String> {
+    let discovery = crate::caldav::discover(
+        &input.server_url,
+        &input.username,
+        &input.password,
+    )
+    .await?;
+    let status = db.with_conn(|conn| {
+        persist_connect(
+            conn,
+            input.server_url,
+            input.username,
+            &input.password,
+            discovery,
+        )
+    })?;
+    if status.account.is_some() {
+        let _ = crate::sync::sync_with_password(&db, &input.password).await;
+    }
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn disconnect_account_cmd(db: tauri::State<'_, Db>) -> Result<(), String> {
+    db.with_conn(disconnect_account)
+}
+
+#[tauri::command]
+pub async fn rediscover_calendars(db: tauri::State<'_, Db>) -> Result<AccountStatus, String> {
+    let (server_url, username, password) = db.with_conn(|conn| {
+        let account = get_account_status(conn)?;
+        let account = account
+            .account
+            .ok_or_else(|| "未登录账户".to_string())?;
+        let credential_ref = crate::credentials::credential_ref_for_account(&account.id);
+        let password = crate::credentials::load_password(&credential_ref)?;
+        Ok((account.server_url, account.username, password))
+    })?;
+    let discovery = crate::caldav::discover(&server_url, &username, &password).await?;
+    db.with_conn(|conn| persist_rediscover(conn, discovery))
 }
 
 #[cfg(test)]
@@ -223,6 +304,7 @@ mod tests {
             "memos",
             "change_queue",
             "conflicts",
+            "app_state",
         ] {
             let count: i64 = conn
                 .query_row(

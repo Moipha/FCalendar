@@ -17,7 +17,7 @@ import { DRAG_DROP_KEY } from "@/composables/useDragDrop";
 import { useLayoutStore } from "@/stores/layout";
 import { useTaskDragStore } from "@/stores/taskDrag";
 
-defineProps<{
+const props = defineProps<{
   calendarId: string;
 }>();
 
@@ -37,8 +37,9 @@ const dialogOpen = ref(false);
 const dialogTask = ref<TaskRow | null>(null);
 
 const { data: tasks } = useQuery({
-  queryKey: ["tasks"],
-  queryFn: listTasks,
+  queryKey: computed(() => ["tasks", props.calendarId]),
+  queryFn: () => listTasks(props.calendarId || undefined),
+  enabled: () => Boolean(props.calendarId),
 });
 
 const taskItems = computed(() => tasks.value?.filter((task) => !task.isStamp) ?? []);
@@ -88,7 +89,12 @@ async function commitDraft() {
   if (!summary) {
     return;
   }
-  await createTask({ summary, description: null, isStamp: false });
+  await createTask({
+    calendarId: props.calendarId,
+    summary,
+    description: null,
+    isStamp: false,
+  });
   await invalidateTasks();
 }
 

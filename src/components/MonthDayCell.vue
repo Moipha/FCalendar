@@ -343,7 +343,7 @@ const daySurfaceStyle = computed(() => {
   left: 3px;
   width: 2px;
   border-radius: 1px;
-  background: color-mix(in oklab, var(--fc-day-bg, var(--background)) 80%, transparent);
+  background: color-mix(in oklab, var(--fc-day-bg, var(--background)) 80%, #333);
 }
 
 .fc-month-event:active {

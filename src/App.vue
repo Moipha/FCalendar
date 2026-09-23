@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { CalendarClock, Inbox, Settings } from "@lucide/vue";
-import { onMounted, onUnmounted, provide, ref } from "vue";
+import { useQueryClient } from "@tanstack/vue-query";
+import { onMounted, onUnmounted, provide, ref, watch } from "vue";
 
 import AppTitleBar from "@/components/AppTitleBar.vue";
 import DragTitlePreview from "@/components/DragTitlePreview.vue";
@@ -8,25 +9,21 @@ import MonthCalendar from "@/components/MonthCalendar.vue";
 import OverviewPane from "@/components/OverviewPane.vue";
 import SettingsDialog from "@/components/SettingsDialog.vue";
 import TaskPane from "@/components/TaskPane.vue";
-import { listCalendars } from "@/api/calendars";
 import { DRAG_DROP_KEY, useDragDrop } from "@/composables/useDragDrop";
 import { useCalendarViewStore } from "@/stores/calendarView";
 import { useLayoutStore } from "@/stores/layout";
+import { useSessionStore } from "@/stores/session";
 import { useSettingsStore } from "@/stores/settings";
-import { useQuery } from "@tanstack/vue-query";
 import { computed } from "vue";
 
 const layout = useLayoutStore();
 const settings = useSettingsStore();
+const session = useSessionStore();
 const calendarView = useCalendarViewStore();
+const queryClient = useQueryClient();
 const dragging = ref(false);
 
-const { data: calendars } = useQuery({
-  queryKey: ["calendars"],
-  queryFn: listCalendars,
-});
-
-const calendarId = computed(() => calendars.value?.[0]?.id ?? "");
+const calendarId = computed(() => session.currentCalendarId);
 
 const dragDrop = useDragDrop(() => calendarId.value);
 provide(DRAG_DROP_KEY, dragDrop);
@@ -52,8 +49,19 @@ function stopDragging() {
   window.getSelection()?.removeAllRanges();
 }
 
+watch(
+  () => session.currentCalendarId,
+  () => {
+    void queryClient.invalidateQueries({ queryKey: ["events"] });
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    void queryClient.invalidateQueries({ queryKey: ["dayColors"] });
+    void queryClient.invalidateQueries({ queryKey: ["calendars"] });
+  },
+);
+
 onMounted(() => {
   settings.hydrate();
+  void session.bootstrap();
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", stopDragging);
   window.addEventListener("pointercancel", stopDragging);
@@ -110,15 +118,40 @@ function railButtonClass(page: "tasks" | "overview") {
       >
         <CalendarClock class="size-5" />
       </button>
-      <button
-        type="button"
-        title="设置"
-        class="mx-3 mt-auto mb-3 flex h-10 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60"
-        @pointerdown.stop
-        @click="settings.openDialog()"
-      >
-        <Settings class="size-5" />
-      </button>
+      <div class="mx-3 mt-auto mb-3 flex flex-col items-center gap-2">
+        <button
+          v-if="session.connectionStatus !== 'logged_out'"
+          type="button"
+          class="flex size-5 items-center justify-center"
+          :title="
+            session.connectionStatus === 'online'
+              ? '在线'
+              : session.connectionStatus === 'auth_error'
+                ? '密码无效，点击打开设置'
+                : '离线'
+          "
+          @pointerdown.stop
+          @click="settings.openDialog()"
+        >
+          <span
+            class="size-2.5 rounded-full"
+            :class="
+              session.connectionStatus === 'online'
+                ? 'bg-emerald-500'
+                : 'bg-red-500'
+            "
+          />
+        </button>
+        <button
+          type="button"
+          title="设置"
+          class="flex h-10 w-full items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60"
+          @pointerdown.stop
+          @click="settings.openDialog()"
+        >
+          <Settings class="size-5" />
+        </button>
+      </div>
     </aside>
 
     <section
@@ -153,5 +186,15 @@ function railButtonClass(page: "tasks" | "overview") {
 
     <DragTitlePreview />
     <SettingsDialog />
+    <div
+      v-if="session.authToast"
+      class="fixed bottom-6 left-1/2 z-[80] flex -translate-x-1/2 items-center gap-3 rounded-lg bg-foreground px-4 py-2 text-sm text-background shadow-lg"
+    >
+      <span>{{ session.authToast }}</span>
+      <button type="button" class="underline" @click="settings.openDialog(); session.clearAuthToast()">
+        打开设置
+      </button>
+      <button type="button" @click="session.clearAuthToast()">关闭</button>
+    </div>
   </div>
 </template>

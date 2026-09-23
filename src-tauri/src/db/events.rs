@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::calendars::calendar_has_account;
-use super::ics::{build_event_ics, EventDraft};
+use super::ics::EventDraft;
+use super::ics_patch::event_ics_from_existing;
+use super::queue;
 use super::time::{
     format_date, format_offset_datetime, parse_date, parse_offset_datetime, to_ics_date,
     to_ics_datetime, window_end_exclusive, window_start, now_millis,
@@ -299,15 +301,18 @@ pub fn create_event(conn: &Connection, input: SaveEventInput) -> Result<EventRow
     };
 
     let (stored_start, stored_end) = normalize_stored_range(&input)?;
-    let ics = build_event_ics(&EventDraft {
-        uid: uid.clone(),
-        summary: input.summary.clone(),
-        description: input.description.clone(),
-        all_day: input.all_day,
-        dtstart: stored_start.clone(),
-        dtend: stored_end.clone(),
-        rrule: input.rrule.clone(),
-    })?;
+    let ics = event_ics_from_existing(
+        None,
+        &EventDraft {
+            uid: uid.clone(),
+            summary: input.summary.clone(),
+            description: input.description.clone(),
+            all_day: input.all_day,
+            dtstart: stored_start.clone(),
+            dtend: stored_end.clone(),
+            rrule: input.rrule.clone(),
+        },
+    )?;
 
     conn.execute(
         "INSERT INTO events (
@@ -331,6 +336,9 @@ pub fn create_event(conn: &Connection, input: SaveEventInput) -> Result<EventRow
     )
     .map_err(|e| format!("insert event: {e}"))?;
 
+    if dirty == 1 {
+        queue::enqueue(conn, "event", &id, "create")?;
+    }
     get_event(conn, &id)
 }
 
@@ -347,16 +355,26 @@ pub fn update_event(conn: &Connection, id: &str, input: SaveEventInput) -> Resul
         0
     };
 
+    let existing_ics: String = conn
+        .query_row(
+            "SELECT ics FROM events WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("load event ics: {e}"))?;
     let (stored_start, stored_end) = normalize_stored_range(&input)?;
-    let ics = build_event_ics(&EventDraft {
-        uid: existing.uid.clone(),
-        summary: input.summary.clone(),
-        description: input.description.clone(),
-        all_day: input.all_day,
-        dtstart: stored_start.clone(),
-        dtend: stored_end.clone(),
-        rrule: input.rrule.clone(),
-    })?;
+    let ics = event_ics_from_existing(
+        Some(&existing_ics),
+        &EventDraft {
+            uid: existing.uid.clone(),
+            summary: input.summary.clone(),
+            description: input.description.clone(),
+            all_day: input.all_day,
+            dtstart: stored_start.clone(),
+            dtend: stored_end.clone(),
+            rrule: input.rrule.clone(),
+        },
+    )?;
 
     conn.execute(
         "UPDATE events SET
@@ -387,21 +405,161 @@ pub fn update_event(conn: &Connection, id: &str, input: SaveEventInput) -> Resul
     )
     .map_err(|e| format!("update event: {e}"))?;
 
+    if dirty == 1 {
+        queue::enqueue(conn, "event", id, "update")?;
+    }
     get_event(conn, &id)
 }
 
 pub fn delete_event(conn: &Connection, id: &str) -> Result<(), String> {
     let now = now_millis();
+    let calendar_id: String = conn
+        .query_row(
+            "SELECT calendar_id FROM events WHERE id = ?1 AND deleted_at IS NULL",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("event not found: {e}"))?;
+    let remote = calendar_has_account(conn, &calendar_id)?;
     let updated = conn
         .execute(
-            "UPDATE events SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
-            params![id, now],
+            "UPDATE events SET deleted_at = ?2, updated_at = ?2, dirty = ?3 WHERE id = ?1 AND deleted_at IS NULL",
+            params![id, now, i64::from(remote)],
         )
         .map_err(|e| format!("delete event: {e}"))?;
     if updated == 0 {
         return Err(format!("event not found: {id}"));
     }
+    if remote {
+        queue::enqueue(conn, "event", id, "delete")?;
+    }
     Ok(())
+}
+
+pub struct EventSyncRow {
+    pub id: String,
+    pub uid: String,
+    pub href: Option<String>,
+    pub etag: Option<String>,
+    pub ics: String,
+    pub dirty: bool,
+    pub deleted_at: Option<i64>,
+}
+
+pub fn list_sync_events(conn: &Connection, calendar_id: &str) -> Result<Vec<EventSyncRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, uid, href, etag, ics, dirty, deleted_at
+             FROM events WHERE calendar_id = ?1",
+        )
+        .map_err(|e| format!("prepare sync events: {e}"))?;
+    let rows = stmt
+        .query_map(params![calendar_id], |row| {
+            Ok(EventSyncRow {
+                id: row.get(0)?,
+                uid: row.get(1)?,
+                href: row.get(2)?,
+                etag: row.get(3)?,
+                ics: row.get(4)?,
+                dirty: row.get::<_, i64>(5)? == 1,
+                deleted_at: row.get(6)?,
+            })
+        })
+        .map_err(|e| format!("query sync events: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect sync events: {e}"))?;
+    Ok(rows)
+}
+
+pub fn upsert_remote_event(
+    conn: &Connection,
+    calendar_id: &str,
+    uid: &str,
+    href: &str,
+    etag: Option<&str>,
+    ics: &str,
+    summary: &str,
+    description: Option<&str>,
+    all_day: bool,
+    dtstart: &str,
+    dtend: Option<&str>,
+    rrule: Option<&str>,
+) -> Result<(), String> {
+    let now = now_millis();
+    let existing: Option<String> = match conn.query_row(
+        "SELECT id FROM events WHERE calendar_id = ?1 AND uid = ?2",
+        params![calendar_id, uid],
+        |row| row.get(0),
+    ) {
+        Ok(id) => Some(id),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => return Err(format!("lookup event uid: {e}")),
+    };
+    if let Some(id) = existing {
+        conn.execute(
+            "UPDATE events SET href=?2, etag=?3, ics=?4, summary=?5, description=?6,
+                all_day=?7, dtstart=?8, dtend=?9, rrule=?10, dirty=0, deleted_at=NULL, updated_at=?11
+             WHERE id=?1",
+            params![
+                id,
+                href,
+                etag,
+                ics,
+                summary,
+                description,
+                i64::from(all_day),
+                dtstart,
+                dtend,
+                rrule,
+                now
+            ],
+        )
+        .map_err(|e| format!("update remote event: {e}"))?;
+    } else {
+        conn.execute(
+            "INSERT INTO events (
+                id, calendar_id, uid, href, etag, ics, summary, description,
+                dtstart, dtend, all_day, rrule, dirty, created_at, updated_at
+            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,0,?13,?13)",
+            params![
+                Uuid::new_v4().to_string(),
+                calendar_id,
+                uid,
+                href,
+                etag,
+                ics,
+                summary,
+                description,
+                dtstart,
+                dtend,
+                i64::from(all_day),
+                rrule,
+                now
+            ],
+        )
+        .map_err(|e| format!("insert remote event: {e}"))?;
+    }
+    Ok(())
+}
+
+pub fn mark_event_synced(
+    conn: &Connection,
+    id: &str,
+    href: &str,
+    etag: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE events SET href=?2, etag=?3, dirty=0 WHERE id=?1",
+        params![id, href, etag],
+    )
+    .map_err(|e| format!("mark event synced: {e}"))?;
+    queue::drop_entity_queue(conn, "event", id)
+}
+
+pub fn hard_delete_event(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM events WHERE id = ?1", params![id])
+        .map_err(|e| format!("hard delete event: {e}"))?;
+    queue::drop_entity_queue(conn, "event", id)
 }
 
 fn normalize_stored_range(input: &SaveEventInput) -> Result<(String, String), String> {

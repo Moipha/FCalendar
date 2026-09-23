@@ -11,6 +11,7 @@ export type TaskRow = {
 };
 
 export type CreateTaskInput = {
+  calendarId?: string;
   summary: string;
   description?: string | null;
   isStamp: boolean;
@@ -22,8 +23,8 @@ export type UpdateTaskInput = {
   isStamp: boolean;
 };
 
-export function listTasks() {
-  return invoke<TaskRow[]>("list_tasks");
+export function listTasks(calendarId?: string) {
+  return invoke<TaskRow[]>("list_tasks", { calendarId });
 }
 
 export function createTask(input: CreateTaskInput) {

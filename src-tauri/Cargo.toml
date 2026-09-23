@@ -29,6 +29,8 @@ r2d2_sqlite = "0.25"
 rusqlite_migration = "1.2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 quick-xml = "0.37"
+keyring = { version = "3", features = ["windows-native"] }
+url = "2"
 rrule = "0.13"
 icalendar = "0.16"
 uuid = { version = "1", features = ["v4"] }

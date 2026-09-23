@@ -2,6 +2,7 @@ use rusqlite::{params, Connection};
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::sqlite_util::map_optional;
 use super::time::now_millis;
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,6 +35,34 @@ pub fn seed_default_calendar(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("seed local calendar: {e}"))?;
     Ok(())
+}
+
+pub fn local_calendar_id(conn: &Connection) -> Result<Option<String>, String> {
+    let result = conn.query_row(
+        "SELECT id FROM calendars WHERE account_id IS NULL ORDER BY created_at ASC LIMIT 1",
+        [],
+        |row| row.get(0),
+    );
+    map_optional(result).map_err(|e| format!("load local calendar: {e}"))
+}
+
+pub fn get_calendar(conn: &Connection, id: &str) -> Result<CalendarRow, String> {
+    conn.query_row(
+        "SELECT id, account_id, href, display_name, color, visible
+         FROM calendars WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(CalendarRow {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                href: row.get(2)?,
+                display_name: row.get(3)?,
+                color: row.get(4)?,
+                visible: row.get::<_, i64>(5)? == 1,
+            })
+        },
+    )
+    .map_err(|e| format!("get calendar: {e}"))
 }
 
 pub fn list_calendars(conn: &Connection) -> Result<Vec<CalendarRow>, String> {

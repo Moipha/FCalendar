@@ -8,15 +8,19 @@ export type DayColorRow = {
   color: DayColorPreset | string;
 };
 
-export function listDayColors(from: string, to: string) {
-  return invoke<DayColorRow[]>("list_day_colors", { from, to });
+export function listDayColors(from: string, to: string, calendarId?: string) {
+  return invoke<DayColorRow[]>("list_day_colors", { from, to, calendarId });
 }
 
 /** 传 `null` 或省略 color 表示恢复默认底色（删除库内记录）。 */
-export function setDayColor(date: string, color: DayColorPreset | null) {
-  return invoke<void>("set_day_color", { date, color });
+export function setDayColor(date: string, color: DayColorPreset | null, calendarId?: string) {
+  return invoke<void>("set_day_color", { date, color, calendarId });
 }
 
-export function setDayColors(dates: string[], color: DayColorPreset | null) {
-  return invoke<void>("set_day_colors", { dates, color });
+export function setDayColors(
+  dates: string[],
+  color: DayColorPreset | null,
+  calendarId?: string,
+) {
+  return invoke<void>("set_day_colors", { dates, color, calendarId });
 }

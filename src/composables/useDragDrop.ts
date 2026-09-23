@@ -89,6 +89,7 @@ export function useDragDrop(calendarId: () => string) {
   async function dropEventToInbox(eventId: string, isStamp: boolean) {
     const event = await getEvent(eventId);
     await createTask({
+      calendarId: calendarId(),
       summary: event.summary,
       description: event.description ?? null,
       isStamp,

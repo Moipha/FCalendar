@@ -11,7 +11,7 @@ import {
   watch,
 } from "vue";
 
-import { listCalendars } from "@/api/calendars";
+import { useSessionStore } from "@/stores/session";
 import {
   listDayColors,
   setDayColor,
@@ -130,12 +130,8 @@ const visibleWeeks = computed(() => {
   }));
 });
 
-const { data: calendars } = useQuery({
-  queryKey: ["calendars"],
-  queryFn: listCalendars,
-});
-
-const calendarId = computed(() => calendars.value?.[0]?.id ?? "");
+const session = useSessionStore();
+const calendarId = computed(() => session.currentCalendarId);
 
 const { data: instances } = useQuery({
   queryKey: ["events", eventRange, calendarId],
@@ -144,13 +140,14 @@ const { data: instances } = useQuery({
 });
 
 const dayColorsKey = computed(() =>
-  dayColorsQueryKey(eventRange.value.from, eventRange.value.to),
+  dayColorsQueryKey(eventRange.value.from, eventRange.value.to, calendarId.value),
 );
 
 const { data: dayColorRows } = useQuery({
   queryKey: dayColorsKey,
-  queryFn: () => listDayColors(eventRange.value.from, eventRange.value.to),
-  enabled: () => Boolean(eventRange.value.from && eventRange.value.to),
+  queryFn: () =>
+    listDayColors(eventRange.value.from, eventRange.value.to, calendarId.value || undefined),
+  enabled: () => Boolean(calendarId.value && eventRange.value.from && eventRange.value.to),
 });
 
 /** 日格底色：与查询同步，改色时先本地更新以保证格子立刻变色。 */
@@ -227,10 +224,10 @@ async function persistDayColors(dates: string[], preset: DayColorPreset | null) 
     return;
   }
   if (dates.length === 1) {
-    await setDayColor(dates[0], preset);
+    await setDayColor(dates[0], preset, calendarId.value || undefined);
     return;
   }
-  await setDayColors(dates, preset);
+  await setDayColors(dates, preset, calendarId.value || undefined);
 }
 
 function selectionHasAnyTint(dates: string[]) {
