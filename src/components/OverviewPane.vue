@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { ChevronDown, ChevronRight } from "@lucide/vue";
+import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { computed, ref } from "vue";
 
 import {
@@ -13,8 +13,12 @@ import {
   type SaveEventInput,
 } from "@/api/events";
 import EventDialog from "@/components/EventDialog.vue";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { invalidateEvents, overviewEventsQueryKey } from "@/lib/calendarQueries";
 import { toZonedDateTime } from "@/lib/datetime";
 import { colloquialUntil, nextHolidayFrom, startOfDayInstant } from "@/lib/holiday";
+import { useSessionStore } from "@/stores/session";
 import { useSettingsStore } from "@/stores/settings";
 
 const props = defineProps<{
@@ -22,9 +26,11 @@ const props = defineProps<{
 }>();
 
 const settings = useSettingsStore();
+const session = useSessionStore();
 const queryClient = useQueryClient();
 
 const todayIso = computed(() => Temporal.Now.plainDateISO().toString());
+const tomorrowIso = computed(() => Temporal.PlainDate.from(todayIso.value).add({ days: 1 }).toString());
 
 const eventRange = computed(() => {
   const from = todayIso.value;
@@ -34,8 +40,15 @@ const eventRange = computed(() => {
 
 const calendarId = computed(() => props.calendarId);
 
-const { data: instances } = useQuery({
-  queryKey: ["events", "overview", eventRange, calendarId],
+const {
+  data: instances,
+  isPending: eventsPending,
+  isError: eventsError,
+  refetch: refetchEvents,
+} = useQuery({
+  queryKey: computed(() =>
+    overviewEventsQueryKey(eventRange.value.from, eventRange.value.to, calendarId.value),
+  ),
   queryFn: () =>
     listEvents(eventRange.value.from, eventRange.value.to, calendarId.value || undefined),
   enabled: () => Boolean(calendarId.value && eventRange.value.from),
@@ -60,12 +73,41 @@ function instanceStartSortKey(instance: EventInstance): string {
   return instance.dtstart;
 }
 
+function instanceDayKey(instance: EventInstance): string {
+  if (instance.allDay) {
+    return instance.dtstart.slice(0, 10);
+  }
+  return toZonedDateTime(instance.dtstart).toPlainDate().toString();
+}
+
 const upcomingEvents = computed(() => {
   const now = Temporal.Now.instant();
   const today = todayIso.value;
   return [...(instances.value ?? [])]
     .filter((item) => instanceStillOpen(item, now, today))
     .sort((a, b) => instanceStartSortKey(a).localeCompare(instanceStartSortKey(b)));
+});
+
+const groupedUpcoming = computed(() => {
+  const groups: { key: string; label: string; items: EventInstance[] }[] = [];
+  const index = new Map<string, (typeof groups)[number]>();
+  for (const item of upcomingEvents.value) {
+    const key = instanceDayKey(item);
+    let group = index.get(key);
+    if (!group) {
+      let label = `${Temporal.PlainDate.from(key).month}月${Temporal.PlainDate.from(key).day}日`;
+      if (key === todayIso.value) {
+        label = "今天";
+      } else if (key === tomorrowIso.value) {
+        label = "明天";
+      }
+      group = { key, label, items: [] };
+      index.set(key, group);
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+  return groups;
 });
 
 const holidayLine = computed(() => {
@@ -97,10 +139,9 @@ function formatWhen(instance: EventInstance) {
     if (end !== start) {
       return `全天 · ${formatMd(start)} – ${formatMd(end)}`;
     }
-    return `全天 · ${formatMd(start)}`;
+    return "全天";
   }
-  const startDate = toZonedDateTime(instance.dtstart).toPlainDate().toString();
-  return `${formatMd(startDate)} ${formatHm(instance.dtstart)}`;
+  return formatHm(instance.dtstart);
 }
 
 const upcomingExpanded = ref(true);
@@ -117,9 +158,10 @@ async function handleSave(input: SaveEventInput) {
     return;
   }
   await updateEvent(editingEvent.value.id, input);
+  session.noteLocalMutation();
   dialogOpen.value = false;
   editingEvent.value = null;
-  await queryClient.invalidateQueries({ queryKey: ["events"] });
+  await invalidateEvents(queryClient);
 }
 
 async function handleDelete() {
@@ -127,9 +169,10 @@ async function handleDelete() {
     return;
   }
   await deleteEvent(editingEvent.value.id);
+  session.noteLocalMutation();
   dialogOpen.value = false;
   editingEvent.value = null;
-  await queryClient.invalidateQueries({ queryKey: ["events"] });
+  await invalidateEvents(queryClient);
 }
 </script>
 
@@ -153,7 +196,7 @@ async function handleDelete() {
 
       <button
         type="button"
-        class="mt-5 flex w-full items-center justify-between py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/30"
+        class="text-muted-foreground hover:bg-muted/30 mt-5 flex w-full items-center justify-between py-2 text-left text-xs font-medium"
         :title="upcomingExpanded ? '收起' : '展开'"
         @click="upcomingExpanded = !upcomingExpanded"
       >
@@ -162,19 +205,40 @@ async function handleDelete() {
         <ChevronRight v-else class="size-4" aria-hidden="true" />
       </button>
       <div v-show="upcomingExpanded">
-        <div v-if="upcomingEvents.length === 0" class="py-4 text-xs text-muted-foreground">
+        <div v-if="eventsPending" class="space-y-2 py-3">
+          <Skeleton class="h-10 w-full" />
+          <Skeleton class="h-10 w-5/6" />
+        </div>
+        <div v-else-if="eventsError" class="text-muted-foreground flex items-center gap-2 py-4 text-xs">
+          <span>待进行加载失败</span>
+          <Button type="button" variant="link" class="h-auto px-0 text-xs" @click="refetchEvents()">
+            重试
+          </Button>
+        </div>
+        <div v-else-if="groupedUpcoming.length === 0" class="text-muted-foreground py-4 text-xs">
           这段时间没有待进行的事件
         </div>
-        <button
-          v-for="item in upcomingEvents"
-          :key="item.instanceId"
-          type="button"
-          class="flex w-full flex-col gap-0.5 rounded-md px-2 py-2 text-left hover:bg-muted/50"
-          @click="openEvent(item.eventId)"
-        >
-          <span class="truncate text-sm">{{ item.summary }}</span>
-          <span class="text-xs text-muted-foreground">{{ formatWhen(item) }}</span>
-        </button>
+        <div v-else class="space-y-3">
+          <section v-for="group in groupedUpcoming" :key="group.key">
+            <p class="text-muted-foreground px-2 pb-1 text-xs font-medium">{{ group.label }}</p>
+            <button
+              v-for="item in group.items"
+              :key="item.instanceId"
+              type="button"
+              class="hover:bg-muted/50 flex w-full items-start gap-2 rounded-md px-2 py-2 text-left"
+              @click="openEvent(item.eventId)"
+            >
+              <span
+                class="mt-0.5 h-8 w-0.5 shrink-0 rounded-full"
+                :style="{ background: 'color-mix(in oklab, var(--primary) 45%, transparent)' }"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm">{{ item.summary }}</span>
+                <span class="text-muted-foreground text-xs">{{ formatWhen(item) }}</span>
+              </span>
+            </button>
+          </section>
+        </div>
       </div>
     </div>
 

@@ -11,6 +11,7 @@ import {
   watch,
 } from "vue";
 
+import { onChromeDblClick, onChromeDragPointerDown } from "@/lib/windowDrag";
 import { useSessionStore } from "@/stores/session";
 import {
   listDayColors,
@@ -29,12 +30,15 @@ import {
   type EventRow,
   type SaveEventInput,
 } from "@/api/events";
+import AppDatePicker from "@/components/AppDatePicker.vue";
 import EventDialog from "@/components/EventDialog.vue";
 import MonthDayCell from "@/components/MonthDayCell.vue";
 import MonthDayContextMenu from "@/components/MonthDayContextMenu.vue";
+import { Button } from "@/components/ui/button";
 import { formatMonthLabel, toZonedDateTime, weekdayLabelsFor } from "@/lib/datetime";
 import { normalizeDayColorPreset, type DayCellTint } from "@/lib/dayCellColors";
 import { dateRangeInclusiveInStrip } from "@/lib/daySelection";
+import { invalidateEvents, monthEventsQueryKey } from "@/lib/calendarQueries";
 import { dayColorsQueryKey } from "@/lib/dayColorsQuery";
 import { clearLunarDayCache, ensureLunarDays, getLunarDayInfo } from "@/lib/lunarDay";
 import {
@@ -94,7 +98,6 @@ function initialStrip() {
 }
 
 const scrollViewportRef = ref<HTMLElement | null>(null);
-const datePickerRef = ref<HTMLInputElement | null>(null);
 const viewportHeight = ref(0);
 const stripStartMonday = ref<Temporal.PlainDate>(initialStrip().firstMonday);
 const stripWeekCount = ref(initialStrip().weeks.length);
@@ -134,7 +137,9 @@ const session = useSessionStore();
 const calendarId = computed(() => session.currentCalendarId);
 
 const { data: instances } = useQuery({
-  queryKey: ["events", eventRange, calendarId],
+  queryKey: computed(() =>
+    monthEventsQueryKey(eventRange.value.from, eventRange.value.to, calendarId.value),
+  ),
   queryFn: () => listEvents(eventRange.value.from, eventRange.value.to, calendarId.value || undefined),
   enabled: () => Boolean(calendarId.value && eventRange.value.from && eventRange.value.to),
 });
@@ -225,9 +230,10 @@ async function persistDayColors(dates: string[], preset: DayColorPreset | null) 
   }
   if (dates.length === 1) {
     await setDayColor(dates[0], preset, calendarId.value || undefined);
-    return;
+  } else {
+    await setDayColors(dates, preset, calendarId.value || undefined);
   }
-  await setDayColors(dates, preset, calendarId.value || undefined);
+  session.noteLocalMutation();
 }
 
 function selectionHasAnyTint(dates: string[]) {
@@ -239,6 +245,7 @@ type DayEvent = {
   eventId: string;
   summary: string;
   allDay: boolean;
+  dtstart: string;
 };
 
 function datesForInstance(instance: EventInstance): string[] {
@@ -265,6 +272,7 @@ const eventsByDate = computed(() => {
       eventId: instance.eventId,
       summary: instance.summary,
       allDay: instance.allDay,
+      dtstart: instance.dtstart,
     };
     for (const date of datesForInstance(instance)) {
       const bucket = map.get(date);
@@ -512,21 +520,7 @@ function selectedDateValue() {
   return `${selectedYear.value}-${`${selectedMonth.value}`.padStart(2, "0")}-01`;
 }
 
-function openDatePicker() {
-  const input = datePickerRef.value;
-  if (!input) {
-    return;
-  }
-  input.value = selectedDateValue();
-  try {
-    input.showPicker();
-  } catch {
-    input.click();
-  }
-}
-
-function onDatePicked(event: Event) {
-  const value = (event.target as HTMLInputElement).value;
+function onTitleDatePicked(value: string) {
   if (!value) {
     return;
   }
@@ -747,8 +741,8 @@ function onEventClick(eventId: string) {
   void openEditDialog(eventId);
 }
 
-async function invalidateEvents() {
-  await queryClient.invalidateQueries({ queryKey: ["events"] });
+async function refreshEvents() {
+  await invalidateEvents(queryClient);
 }
 
 async function handleSave(input: SaveEventInput) {
@@ -757,8 +751,9 @@ async function handleSave(input: SaveEventInput) {
   } else if (editingEvent.value) {
     await updateEvent(editingEvent.value.id, input);
   }
+  session.noteLocalMutation();
   dialogOpen.value = false;
-  await invalidateEvents();
+  await refreshEvents();
 }
 
 async function handleDelete() {
@@ -766,8 +761,9 @@ async function handleDelete() {
     return;
   }
   await deleteEvent(editingEvent.value.id);
+  session.noteLocalMutation();
   dialogOpen.value = false;
-  await invalidateEvents();
+  await refreshEvents();
 }
 
 onMounted(() => {
@@ -803,46 +799,28 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <Teleport defer to="#app-title-leading">
-      <button
-        type="button"
-        class="rounded-md px-1.5 py-0.5 text-base font-medium hover:bg-muted"
-        title="选择日期"
-        @pointerdown.stop
-        @click="openDatePicker"
-      >
-        {{ monthLabel }}
-      </button>
-      <input
-        ref="datePickerRef"
-        type="date"
-        class="pointer-events-none fixed h-px w-px opacity-0"
-        tabindex="-1"
-        :value="selectedDateValue()"
-        @change="onDatePicked"
+      <div @pointerdown.stop>
+        <AppDatePicker :model-value="selectedDateValue()" @update:model-value="onTitleDatePicked">
+          <Button type="button" variant="ghost" class="h-8 px-1.5 text-base font-medium">
+            {{ monthLabel }}
+          </Button>
+        </AppDatePicker>
+      </div>
+      <div
+        class="h-full min-w-4 flex-1"
+        @pointerdown.stop="onChromeDragPointerDown"
+        @dblclick.stop.prevent="onChromeDblClick"
       />
-      <div class="h-full min-w-4 flex-1" data-tauri-drag-region />
       <div class="flex items-center gap-1" @pointerdown.stop>
-        <button
-          class="flex h-8 w-8 items-center justify-center rounded-md border border-border"
-          title="上个月"
-          @click="shiftMonth(-1)"
-        >
-          <ChevronLeft class="size-4" />
-        </button>
-        <button
-          class="flex h-8 w-8 items-center justify-center rounded-md border border-border"
-          title="回到当前月"
-          @click="goToday"
-        >
+        <Button variant="ghost" size="icon" title="上个月" @click="shiftMonth(-1)">
+          <ChevronLeft />
+        </Button>
+        <Button variant="ghost" size="icon" title="回到当前月" @click="goToday">
           <Circle class="size-3.5" />
-        </button>
-        <button
-          class="flex h-8 w-8 items-center justify-center rounded-md border border-border"
-          title="下个月"
-          @click="shiftMonth(1)"
-        >
-          <ChevronRight class="size-4" />
-        </button>
+        </Button>
+        <Button variant="ghost" size="icon" title="下个月" @click="shiftMonth(1)">
+          <ChevronRight />
+        </Button>
       </div>
     </Teleport>
 

@@ -71,7 +71,7 @@ impl CaldavClient {
         url: &str,
         body: &str,
         if_match: Option<&str>,
-    ) -> Result<(u16, Option<String>), String> {
+    ) -> Result<(u16, Option<String>, String), String> {
         let mut req = self
             .http
             .put(url)
@@ -88,10 +88,16 @@ impl CaldavClient {
             .get("etag")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
-        Ok((status, etag))
+        let text = response.text().await.unwrap_or_default();
+        if status >= 400 {
+            let msg = format_http_err("PUT", url, status, &text);
+            eprintln!("{msg}");
+            eprintln!("PUT ICS 预览: {}", preview_ics(body));
+        }
+        Ok((status, etag, text))
     }
 
-    pub async fn delete(&self, url: &str, if_match: Option<&str>) -> Result<u16, String> {
+    pub async fn delete(&self, url: &str, if_match: Option<&str>) -> Result<(u16, String), String> {
         let mut req = self
             .http
             .delete(url)
@@ -100,7 +106,12 @@ impl CaldavClient {
             req = req.header("If-Match", etag);
         }
         let response = req.send().await.map_err(|e| format!("DELETE 失败: {e}"))?;
-        Ok(response.status().as_u16())
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap_or_default();
+        if status >= 400 && status != 404 && status != 412 {
+            eprintln!("{}", format_http_err("DELETE", url, status, &text));
+        }
+        Ok((status, text))
     }
 
     pub async fn mkcalendar(
@@ -161,10 +172,27 @@ fn xml_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+fn format_http_err(method: &str, url: &str, status: u16, body: &str) -> String {
+    let detail = if body.trim().is_empty() {
+        "(无响应体)".to_string()
+    } else {
+        truncate_err(body)
+    };
+    format!("{method} {url} 失败 {status}: {detail}")
+}
+
+fn preview_ics(ics: &str) -> String {
+    let compact = ics.trim();
+    if compact.is_empty() {
+        return "(空)".into();
+    }
+    truncate_err(compact)
+}
+
 fn truncate_err(s: &str) -> String {
-    const MAX: usize = 200;
-    if s.len() <= MAX {
+    const MAX: usize = 400;
+    if s.chars().count() <= MAX {
         return s.to_string();
     }
-    format!("{}…", &s[..MAX])
+    format!("{}…", s.chars().take(MAX).collect::<String>())
 }

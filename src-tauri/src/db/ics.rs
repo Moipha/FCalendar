@@ -10,6 +10,7 @@ pub struct EventDraft {
     pub description: Option<String>,
     pub all_day: bool,
     pub dtstart: String,
+    /// 全天为含当日（与表单一致）；带时刻为带偏移 ISO
     pub dtend: String,
     pub rrule: Option<String>,
 }
@@ -89,7 +90,12 @@ pub fn draft_from_row(
         description: description.map(str::to_string),
         all_day,
         dtstart: dtstart.to_string(),
-        dtend: dtend.unwrap_or(dtstart).to_string(),
+        // 库列全天 DTEND 是开区间，生成 ICS 前先折回含当日
+        dtend: if all_day {
+            format_all_day_end_for_form(dtend.unwrap_or(dtstart), dtstart)
+        } else {
+            dtend.unwrap_or(dtstart).to_string()
+        },
         rrule: rrule.map(str::to_string),
     }
 }
@@ -132,5 +138,22 @@ mod tests {
         .unwrap();
         assert!(ics.contains("DTSTART;VALUE=DATE:20260917"));
         assert!(ics.contains("DTEND;VALUE=DATE:20260919"));
+    }
+
+    #[test]
+    fn draft_from_row_converts_exclusive_all_day_end() {
+        let draft = draft_from_row(
+            "uid-1",
+            "Holiday",
+            None,
+            true,
+            "2026-09-25",
+            Some("2026-09-26"),
+            None,
+        );
+        assert_eq!(draft.dtend, "2026-09-25");
+        let ics = build_event_ics(&draft).unwrap();
+        assert!(ics.contains("DTEND;VALUE=DATE:20260926"), "{ics}");
+        assert!(!ics.contains("DTEND;VALUE=DATE:20260927"), "{ics}");
     }
 }

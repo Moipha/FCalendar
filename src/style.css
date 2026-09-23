@@ -1,6 +1,5 @@
 
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
-
+@import "@fontsource-variable/geist";
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn-vue/tailwind.css";
@@ -135,6 +134,12 @@ body,
 #app {
   height: 100%;
   overflow: hidden;
+}
+
+:root {
+  --fc-titlebar-height: 3rem;
+  --fc-rail-width: 80px;
+  --fc-window-controls-width: 8.5rem;
 }
 
 body.is-resizing-panes,

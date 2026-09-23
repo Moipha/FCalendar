@@ -13,8 +13,12 @@ import {
 } from "@/api/tasks";
 import TaskDialog from "@/components/TaskDialog.vue";
 import TaskListItem from "@/components/TaskListItem.vue";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { DRAG_DROP_KEY } from "@/composables/useDragDrop";
 import { useLayoutStore } from "@/stores/layout";
+import { useSessionStore } from "@/stores/session";
 import { useTaskDragStore } from "@/stores/taskDrag";
 
 const props = defineProps<{
@@ -22,6 +26,7 @@ const props = defineProps<{
 }>();
 
 const layout = useLayoutStore();
+const session = useSessionStore();
 const taskDragStore = useTaskDragStore();
 const queryClient = useQueryClient();
 const dragDrop = inject(DRAG_DROP_KEY)!;
@@ -31,12 +36,17 @@ const tasksExpanded = ref(true);
 const stampsExpanded = ref(false);
 const draftActive = ref(false);
 const draftValue = ref("");
-const draftInputRef = ref<HTMLInputElement | null>(null);
+const draftWrapRef = ref<HTMLElement | null>(null);
 const inlineEditingId = ref<string | null>(null);
 const dialogOpen = ref(false);
 const dialogTask = ref<TaskRow | null>(null);
 
-const { data: tasks } = useQuery({
+const {
+  data: tasks,
+  isPending: tasksPending,
+  isError: tasksError,
+  refetch: refetchTasks,
+} = useQuery({
   queryKey: computed(() => ["tasks", props.calendarId]),
   queryFn: () => listTasks(props.calendarId || undefined),
   enabled: () => Boolean(props.calendarId),
@@ -62,7 +72,7 @@ watch(draftActive, async (active) => {
     return;
   }
   await nextTick();
-  draftInputRef.value?.focus();
+  draftWrapRef.value?.querySelector("input")?.focus();
 });
 
 async function invalidateTasks() {
@@ -75,7 +85,7 @@ async function startDraft() {
   }
   tasksExpanded.value = true;
   if (draftActive.value) {
-    draftInputRef.value?.focus();
+    draftWrapRef.value?.querySelector("input")?.focus();
     return;
   }
   draftActive.value = true;
@@ -95,6 +105,7 @@ async function commitDraft() {
     description: null,
     isStamp: false,
   });
+  session.noteLocalMutation();
   await invalidateTasks();
 }
 
@@ -113,6 +124,7 @@ async function saveDialog(input: UpdateTaskInput) {
     return;
   }
   await updateTask(dialogTask.value.id, input);
+  session.noteLocalMutation();
   dialogOpen.value = false;
   dialogTask.value = null;
   await invalidateTasks();
@@ -123,6 +135,7 @@ async function deleteFromDialog() {
     return;
   }
   await deleteTask(dialogTask.value.id);
+  session.noteLocalMutation();
   dialogOpen.value = false;
   dialogTask.value = null;
   await invalidateTasks();
@@ -142,6 +155,7 @@ async function saveInline(task: TaskRow, summary: string) {
     description: task.description ?? null,
     isStamp: task.isStamp,
   });
+  session.noteLocalMutation();
   await invalidateTasks();
 }
 
@@ -154,14 +168,9 @@ function cancelInline() {
   <div class="flex h-full min-h-0 flex-col text-foreground">
     <div class="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
       <span class="text-sm font-medium">任务区</span>
-      <button
-        type="button"
-        class="rounded-md border border-border p-1 hover:bg-muted"
-        title="添加任务"
-        @click="startDraft"
-      >
-        <Plus class="size-4" />
-      </button>
+      <Button type="button" variant="outline" size="icon-sm" title="添加任务" @click="startDraft">
+        <Plus />
+      </Button>
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto">
@@ -177,30 +186,51 @@ function cancelInline() {
           <ChevronRight v-else class="size-4" aria-hidden="true" />
         </button>
         <div v-show="tasksExpanded" class="min-h-[2rem] transition-colors">
-          <div v-if="draftActive" class="border-b border-border/60 px-3 py-2" @keydown.esc.prevent="cancelDraft">
-            <input
-              ref="draftInputRef"
-              v-model="draftValue"
-              class="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
-              placeholder="请输入标题"
-              @keydown.enter.prevent="commitDraft"
-              @blur="commitDraft"
-            />
+          <div v-if="tasksPending" class="space-y-2 px-3 py-3">
+            <Skeleton class="h-7 w-full" />
+            <Skeleton class="h-7 w-4/5" />
           </div>
-          <TaskListItem
-            v-for="task in taskItems"
-            :key="task.id"
-            :task="task"
-            :inline-editing="inlineEditingId === task.id"
-            @open-edit="openEdit"
-            @inline-save="saveInline"
-            @inline-cancel="cancelInline"
-            @drag-start="startTaskDrag"
-            @inline-edit="startInlineEdit"
-          />
-          <p v-if="!draftActive && taskItems.length === 0" class="px-3 py-4 text-xs text-muted-foreground">
-            暂无任务，点击右上角加号添加
-          </p>
+          <div v-else-if="tasksError" class="text-muted-foreground flex items-center gap-2 px-3 py-4 text-xs">
+            <span>任务加载失败</span>
+            <Button type="button" variant="link" class="h-auto px-0 text-xs" @click="refetchTasks()">
+              重试
+            </Button>
+          </div>
+          <template v-else>
+            <div
+              v-if="draftActive"
+              ref="draftWrapRef"
+              class="border-b border-border/60 px-3 py-2"
+              @keydown.esc.prevent="cancelDraft"
+            >
+              <Input
+                v-model="draftValue"
+                placeholder="请输入标题"
+                @keydown.enter.prevent="commitDraft"
+                @blur="commitDraft"
+              />
+            </div>
+            <TaskListItem
+              v-for="task in taskItems"
+              :key="task.id"
+              :task="task"
+              :inline-editing="inlineEditingId === task.id"
+              @open-edit="openEdit"
+              @inline-save="saveInline"
+              @inline-cancel="cancelInline"
+              @drag-start="startTaskDrag"
+              @inline-edit="startInlineEdit"
+            />
+            <div
+              v-if="!draftActive && taskItems.length === 0"
+              class="text-muted-foreground flex flex-col items-start gap-1 px-3 py-4 text-xs"
+            >
+              <p>暂无任务</p>
+              <Button type="button" variant="link" class="h-auto px-0 text-xs" @click="startDraft">
+                点击右上角加号添加
+              </Button>
+            </div>
+          </template>
         </div>
       </section>
 
@@ -227,8 +257,8 @@ function cancelInline() {
             @drag-start="startTaskDrag"
             @inline-edit="startInlineEdit"
           />
-          <p v-if="stampItems.length === 0" class="px-3 py-4 text-xs text-muted-foreground">
-            暂无图章，可将任务转为图章或从图章列表拖入
+          <p v-if="!tasksPending && !tasksError && stampItems.length === 0" class="text-muted-foreground px-3 py-4 text-xs">
+            暂无图章。在任务编辑里打开「恒定图章」，或把条目拖进这里。
           </p>
         </div>
       </section>

@@ -105,9 +105,10 @@ pub fn get_event(conn: &Connection, id: &str) -> Result<EventRow, String> {
 
     if row.all_day {
         if let Some(end_exclusive) = row.dtend.as_deref() {
-            let end_exclusive = parse_date(end_exclusive)?;
-            let end_inclusive = super::ics::inclusive_all_day_end_from_exclusive(end_exclusive);
-            row.dtend = Some(format_date(end_inclusive));
+            row.dtend = Some(super::ics::format_all_day_end_for_form(
+                end_exclusive,
+                &row.dtstart,
+            ));
         }
     }
     Ok(row)
@@ -303,15 +304,7 @@ pub fn create_event(conn: &Connection, input: SaveEventInput) -> Result<EventRow
     let (stored_start, stored_end) = normalize_stored_range(&input)?;
     let ics = event_ics_from_existing(
         None,
-        &EventDraft {
-            uid: uid.clone(),
-            summary: input.summary.clone(),
-            description: input.description.clone(),
-            all_day: input.all_day,
-            dtstart: stored_start.clone(),
-            dtend: stored_end.clone(),
-            rrule: input.rrule.clone(),
-        },
+        &draft_from_save(&uid, &input, &stored_start, &stored_end),
     )?;
 
     conn.execute(
@@ -365,15 +358,7 @@ pub fn update_event(conn: &Connection, id: &str, input: SaveEventInput) -> Resul
     let (stored_start, stored_end) = normalize_stored_range(&input)?;
     let ics = event_ics_from_existing(
         Some(&existing_ics),
-        &EventDraft {
-            uid: existing.uid.clone(),
-            summary: input.summary.clone(),
-            description: input.description.clone(),
-            all_day: input.all_day,
-            dtstart: stored_start.clone(),
-            dtend: stored_end.clone(),
-            rrule: input.rrule.clone(),
-        },
+        &draft_from_save(&existing.uid, &input, &stored_start, &stored_end),
     )?;
 
     conn.execute(
@@ -444,12 +429,19 @@ pub struct EventSyncRow {
     pub ics: String,
     pub dirty: bool,
     pub deleted_at: Option<i64>,
+    pub summary: String,
+    pub description: Option<String>,
+    pub dtstart: String,
+    pub dtend: Option<String>,
+    pub all_day: bool,
+    pub rrule: Option<String>,
 }
 
 pub fn list_sync_events(conn: &Connection, calendar_id: &str) -> Result<Vec<EventSyncRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, uid, href, etag, ics, dirty, deleted_at
+            "SELECT id, uid, href, etag, ics, dirty, deleted_at,
+                    summary, description, dtstart, dtend, all_day, rrule
              FROM events WHERE calendar_id = ?1",
         )
         .map_err(|e| format!("prepare sync events: {e}"))?;
@@ -463,6 +455,12 @@ pub fn list_sync_events(conn: &Connection, calendar_id: &str) -> Result<Vec<Even
                 ics: row.get(4)?,
                 dirty: row.get::<_, i64>(5)? == 1,
                 deleted_at: row.get(6)?,
+                summary: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+                description: row.get(8)?,
+                dtstart: row.get(9)?,
+                dtend: row.get(10)?,
+                all_day: row.get::<_, i64>(11)? == 1,
+                rrule: row.get(12)?,
             })
         })
         .map_err(|e| format!("query sync events: {e}"))?
@@ -562,6 +560,32 @@ pub fn hard_delete_event(conn: &Connection, id: &str) -> Result<(), String> {
     queue::drop_entity_queue(conn, "event", id)
 }
 
+/// EventDraft 的全天结束日是含当日；库列存 RFC 开区间。
+fn draft_from_save(
+    uid: &str,
+    input: &SaveEventInput,
+    stored_start: &str,
+    stored_end: &str,
+) -> EventDraft {
+    EventDraft {
+        uid: uid.to_string(),
+        summary: input.summary.clone(),
+        description: input.description.clone(),
+        all_day: input.all_day,
+        dtstart: if input.all_day {
+            input.dtstart.clone()
+        } else {
+            stored_start.to_string()
+        },
+        dtend: if input.all_day {
+            input.dtend.clone()
+        } else {
+            stored_end.to_string()
+        },
+        rrule: input.rrule.clone(),
+    }
+}
+
 fn normalize_stored_range(input: &SaveEventInput) -> Result<(String, String), String> {
     if input.all_day {
         let start = parse_date(&input.dtstart)?;
@@ -641,5 +665,87 @@ mod tests {
 
         let instances = list_event_instances(&conn, "2026-09-01", "2026-09-30", None).unwrap();
         assert!(instances.len() >= 4);
+    }
+
+    #[test]
+    fn all_day_create_ics_dtend_is_one_day_exclusive() {
+        let conn = test_conn();
+        let calendar_id = default_calendar_id(&conn);
+        let row = create_event(
+            &conn,
+            SaveEventInput {
+                calendar_id,
+                summary: "Holiday".into(),
+                description: None,
+                all_day: true,
+                dtstart: "2026-09-25".into(),
+                dtend: "2026-09-25".into(),
+                rrule: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(row.dtstart, "2026-09-25");
+        assert_eq!(row.dtend.as_deref(), Some("2026-09-25"));
+
+        let ics: String = conn
+            .query_row("SELECT ics FROM events WHERE id = ?1", params![row.id], |r| r.get(0))
+            .unwrap();
+        assert!(ics.contains("DTSTART;VALUE=DATE:20260925"), "{ics}");
+        assert!(ics.contains("DTEND;VALUE=DATE:20260926"), "{ics}");
+        assert!(!ics.contains("DTEND;VALUE=DATE:20260927"), "{ics}");
+
+        let instances = list_event_instances(&conn, "2026-09-01", "2026-09-30", None).unwrap();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].dtstart, "2026-09-25");
+        assert_eq!(instances[0].dtend, "2026-09-25");
+    }
+
+    #[test]
+    fn all_day_remote_upsert_form_end_stays_inclusive() {
+        use crate::db::ics_patch::{classify_ics, RemoteObject};
+
+        let conn = test_conn();
+        let calendar_id = default_calendar_id(&conn);
+        let ics = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:pull-1\nSUMMARY:Holiday\nDTSTART;VALUE=DATE:20260925\nDTEND;VALUE=DATE:20260926\nEND:VEVENT\nEND:VCALENDAR\n";
+        let RemoteObject::Event {
+            uid,
+            summary,
+            description,
+            all_day,
+            dtstart,
+            dtend,
+            rrule,
+            ics,
+        } = classify_ics(ics).expect("event")
+        else {
+            panic!("expected event");
+        };
+        assert!(all_day);
+        upsert_remote_event(
+            &conn,
+            &calendar_id,
+            &uid,
+            "/cal/pull-1.ics",
+            Some("etag"),
+            &ics,
+            &summary,
+            description.as_deref(),
+            all_day,
+            &dtstart,
+            dtend.as_deref(),
+            rrule.as_deref(),
+        )
+        .unwrap();
+        let id: String = conn
+            .query_row(
+                "SELECT id FROM events WHERE uid = ?1",
+                params!["pull-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let row = get_event(&conn, &id).unwrap();
+        assert_eq!(row.dtstart, "2026-09-25");
+        assert_eq!(row.dtend.as_deref(), Some("2026-09-25"));
     }
 }

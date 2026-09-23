@@ -229,12 +229,17 @@ pub struct TaskSyncRow {
     pub ics: String,
     pub dirty: bool,
     pub deleted_at: Option<i64>,
+    pub summary: String,
+    pub description: Option<String>,
+    pub is_stamp: bool,
+    pub sort_order: i64,
 }
 
 pub fn list_sync_tasks(conn: &Connection, calendar_id: &str) -> Result<Vec<TaskSyncRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, uid, href, etag, ics, dirty, deleted_at FROM tasks WHERE calendar_id = ?1",
+            "SELECT id, uid, href, etag, ics, dirty, deleted_at, summary, description, is_stamp, sort_order
+             FROM tasks WHERE calendar_id = ?1",
         )
         .map_err(|e| format!("prepare sync tasks: {e}"))?;
     let rows = stmt
@@ -247,6 +252,10 @@ pub fn list_sync_tasks(conn: &Connection, calendar_id: &str) -> Result<Vec<TaskS
                 ics: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
                 dirty: row.get::<_, i64>(5)? == 1,
                 deleted_at: row.get(6)?,
+                summary: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+                description: row.get(8)?,
+                is_stamp: row.get::<_, i64>(9)? == 1,
+                sort_order: row.get(10)?,
             })
         })
         .map_err(|e| format!("query sync tasks: {e}"))?

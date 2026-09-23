@@ -162,12 +162,13 @@ pub struct ColorSyncRow {
     pub ics: String,
     pub dirty: bool,
     pub deleted_at: Option<i64>,
+    pub color: String,
 }
 
 pub fn list_sync_colors(conn: &Connection, calendar_id: &str) -> Result<Vec<ColorSyncRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT date, uid, href, etag, ics, dirty, deleted_at FROM day_colors WHERE calendar_id = ?1",
+            "SELECT date, uid, href, etag, ics, dirty, deleted_at, color FROM day_colors WHERE calendar_id = ?1",
         )
         .map_err(|e| format!("prepare sync colors: {e}"))?;
     let rows = stmt
@@ -180,6 +181,7 @@ pub fn list_sync_colors(conn: &Connection, calendar_id: &str) -> Result<Vec<Colo
                 ics: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
                 dirty: row.get::<_, i64>(5)? == 1,
                 deleted_at: row.get(6)?,
+                color: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
             })
         })
         .map_err(|e| format!("query sync colors: {e}"))?

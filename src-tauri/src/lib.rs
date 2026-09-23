@@ -77,7 +77,7 @@ async fn bootstrap_session(db: tauri::State<'_, db::Db>) -> Result<sync::Session
 }
 
 #[tauri::command]
-async fn sync_current_calendar(db: tauri::State<'_, db::Db>) -> Result<sync::SessionSnapshot, String> {
+async fn sync_current_calendar(db: tauri::State<'_, db::Db>) -> Result<sync::SyncOutcome, String> {
     sync::sync_current(&db).await
 }
 

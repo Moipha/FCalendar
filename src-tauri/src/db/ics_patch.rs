@@ -81,22 +81,39 @@ pub fn day_color_uid(date: &str) -> String {
     format!("fc-daycolor-{date}")
 }
 
+fn unfold_ics(ics: &str) -> String {
+    let mut out = String::new();
+    for line in ics.lines() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            out.push_str(line.trim_start());
+        } else {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(line.trim_end());
+        }
+    }
+    out
+}
+
 pub fn classify_ics(ics: &str) -> Option<RemoteObject> {
-    let block = first_component(ics)?;
+    let ics = unfold_ics(ics);
+    let block = first_component(&ics)?;
     let name = block.name.as_str();
     match name {
-        "VEVENT" => Some(RemoteObject::Event {
-            uid: prop(&block.lines, "UID").unwrap_or_default(),
-            summary: prop(&block.lines, "SUMMARY").unwrap_or_default(),
-            description: prop(&block.lines, "DESCRIPTION"),
-            all_day: prop_line(&block.lines, "DTSTART")
-                .map(|l| l.contains("VALUE=DATE"))
-                .unwrap_or(false),
-            dtstart: parse_ics_dt(&prop_line(&block.lines, "DTSTART")?)?,
-            dtend: prop_line(&block.lines, "DTEND").and_then(|l| parse_ics_dt(&l)),
-            rrule: prop(&block.lines, "RRULE"),
-            ics: ics.to_string(),
-        }),
+        "VEVENT" => {
+            let dtstart = parse_ics_dt(&prop_line(&block.lines, "DTSTART")?)?;
+            Some(RemoteObject::Event {
+                uid: prop(&block.lines, "UID").unwrap_or_default(),
+                summary: prop(&block.lines, "SUMMARY").unwrap_or_default(),
+                description: prop(&block.lines, "DESCRIPTION"),
+                all_day: !dtstart.contains('T'),
+                dtstart,
+                dtend: prop_line(&block.lines, "DTEND").and_then(|l| parse_ics_dt(&l)),
+                rrule: prop(&block.lines, "RRULE"),
+                ics,
+            })
+        }
         "VTODO" => {
             if prop_line(&block.lines, "DTSTART").is_some() {
                 return None;
@@ -112,7 +129,7 @@ pub fn classify_ics(ics: &str) -> Option<RemoteObject> {
                 sort_order: prop(&block.lines, X_SORT)
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0),
-                ics: ics.to_string(),
+                ics,
             })
         }
         "VJOURNAL" => {
@@ -130,7 +147,7 @@ pub fn classify_ics(ics: &str) -> Option<RemoteObject> {
             Some(RemoteObject::DayColor {
                 date,
                 color,
-                ics: ics.to_string(),
+                ics,
             })
         }
         _ => None,
@@ -205,10 +222,23 @@ fn parse_ics_dt(line: &str) -> Option<String> {
     None
 }
 
+fn utc_stamp() -> String {
+    chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string()
+}
+
+fn escape_ics_text(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+        .replace('\r', "")
+        .replace('\n', "\\n")
+}
+
 fn event_known_lines(draft: &EventDraft) -> Result<Vec<String>, String> {
     let mut lines = vec![
         format!("UID:{}", draft.uid),
-        format!("SUMMARY:{}", draft.summary.trim()),
+        format!("DTSTAMP:{}", utc_stamp()),
+        format!("SUMMARY:{}", escape_ics_text(draft.summary.trim())),
     ];
     if let Some(d) = draft
         .description
@@ -216,7 +246,7 @@ fn event_known_lines(draft: &EventDraft) -> Result<Vec<String>, String> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
     {
-        lines.push(format!("DESCRIPTION:{d}"));
+        lines.push(format!("DESCRIPTION:{}", escape_ics_text(d)));
     }
     if draft.all_day {
         let start = parse_date(&draft.dtstart)?;
@@ -252,7 +282,8 @@ fn event_known_lines(draft: &EventDraft) -> Result<Vec<String>, String> {
 fn task_known_lines(draft: &TaskDraft) -> Vec<String> {
     let mut lines = vec![
         format!("UID:{}", draft.uid),
-        format!("SUMMARY:{}", draft.summary.trim()),
+        format!("DTSTAMP:{}", utc_stamp()),
+        format!("SUMMARY:{}", escape_ics_text(draft.summary.trim())),
         format!("{X_SORT}:{}", draft.sort_order),
     ];
     if let Some(d) = draft
@@ -261,7 +292,7 @@ fn task_known_lines(draft: &TaskDraft) -> Vec<String> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
     {
-        lines.push(format!("DESCRIPTION:{d}"));
+        lines.push(format!("DESCRIPTION:{}", escape_ics_text(d)));
     }
     if draft.is_stamp {
         lines.push(format!("{X_STAMP}:1"));
@@ -273,6 +304,7 @@ fn day_color_known_lines(draft: &DayColorDraft) -> Result<Vec<String>, String> {
     let date = parse_date(&draft.date)?;
     Ok(vec![
         format!("UID:{}", day_color_uid(&draft.date)),
+        format!("DTSTAMP:{}", utc_stamp()),
         format!("DTSTART;VALUE=DATE:{}", to_ics_date(date)),
         format!("{X_DAY_COLOR}:{}", draft.color),
     ])
@@ -344,6 +376,46 @@ mod tests {
         .unwrap();
         assert!(ics.contains("SUMMARY:New"));
         assert!(ics.contains("X-FOO:bar"));
+        assert!(ics.contains("DTSTAMP:"));
+    }
+
+    #[test]
+    fn classify_generated_event_ics() {
+        let ics = crate::db::ics::build_event_ics(&EventDraft {
+            uid: "uid-gen".into(),
+            summary: "会议".into(),
+            description: None,
+            all_day: false,
+            dtstart: "2026-09-23T10:00:00+08:00".into(),
+            dtend: "2026-09-23T11:00:00+08:00".into(),
+            rrule: None,
+        })
+        .unwrap();
+        match classify_ics(&ics) {
+            Some(RemoteObject::Event { uid, summary, .. }) => {
+                assert_eq!(uid, "uid-gen");
+                assert_eq!(summary, "会议");
+            }
+            other => panic!("expected event, got {other:?}\n{ics}"),
+        }
+    }
+
+    #[test]
+    fn classify_date_only_dtstart_is_all_day_even_without_value_param() {
+        let ics = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:d1\nSUMMARY:Day\nDTSTART:20260925\nDTEND:20260926\nEND:VEVENT\nEND:VCALENDAR\n";
+        match classify_ics(ics) {
+            Some(RemoteObject::Event {
+                all_day,
+                dtstart,
+                dtend,
+                ..
+            }) => {
+                assert!(all_day);
+                assert_eq!(dtstart, "2026-09-25");
+                assert_eq!(dtend.as_deref(), Some("2026-09-26"));
+            }
+            other => panic!("expected all-day event, got {other:?}"),
+        }
     }
 
     #[test]
@@ -359,6 +431,7 @@ mod tests {
             },
         )
         .unwrap();
+        assert!(ics.contains("DTSTAMP:"));
         match classify_ics(&ics) {
             Some(RemoteObject::Task {
                 is_stamp, sort_order, ..

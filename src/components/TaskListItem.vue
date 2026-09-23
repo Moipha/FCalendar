@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { MoreHorizontal } from "@lucide/vue";
+import { GripVertical, MoreHorizontal } from "@lucide/vue";
 import { nextTick, ref, watch } from "vue";
 
 import type { TaskRow } from "@/api/tasks";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 const props = defineProps<{
   task: TaskRow;
@@ -18,7 +20,7 @@ const emit = defineEmits<{
 }>();
 
 const editValue = ref(props.task.summary);
-const inputRef = ref<HTMLInputElement | null>(null);
+const editWrapRef = ref<HTMLElement | null>(null);
 
 watch(
   () => props.inlineEditing,
@@ -28,8 +30,9 @@ watch(
     }
     editValue.value = props.task.summary;
     await nextTick();
-    inputRef.value?.focus();
-    inputRef.value?.select();
+    const input = editWrapRef.value?.querySelector("input");
+    input?.focus();
+    input?.select();
   },
 );
 
@@ -65,13 +68,12 @@ function onDoubleClick(event: MouseEvent) {
 <template>
   <div
     v-if="inlineEditing"
+    ref="editWrapRef"
     class="border-b border-border/60 px-3 py-2"
     @keydown.esc.prevent="emit('inlineCancel')"
   >
-    <input
-      ref="inputRef"
+    <Input
       v-model="editValue"
-      class="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
       placeholder="请输入标题"
       @keydown.enter.prevent="commitInline"
       @blur="commitInline"
@@ -79,19 +81,22 @@ function onDoubleClick(event: MouseEvent) {
   </div>
   <div
     v-else
-    class="group flex items-center gap-2 border-b border-border/60 px-3 py-2 hover:bg-muted/40"
+    class="group hover:bg-muted/40 flex items-center gap-1 border-b border-border/60 px-2 py-2"
     @contextmenu="onContextMenu"
     @dblclick="onDoubleClick"
     @pointerdown="onPointerDown"
   >
+    <GripVertical class="text-muted-foreground size-3.5 shrink-0 opacity-40" aria-hidden="true" />
     <span class="min-w-0 flex-1 truncate text-sm select-none">{{ task.summary }}</span>
-    <button
+    <Button
       type="button"
-      class="shrink-0 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted"
+      variant="ghost"
+      size="icon-xs"
+      class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
       @pointerdown.stop
       @click.stop="emit('openEdit', task)"
     >
-      <MoreHorizontal class="size-4 text-muted-foreground" />
-    </button>
+      <MoreHorizontal class="text-muted-foreground" />
+    </Button>
   </div>
 </template>

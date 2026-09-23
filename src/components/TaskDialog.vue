@@ -1,7 +1,30 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 
 import type { TaskRow, UpdateTaskInput } from "@/api/tasks";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { preventOverlayDismiss } from "@/lib/dialogDismiss";
 
 const props = defineProps<{
   open: boolean;
@@ -20,7 +43,11 @@ const form = reactive({
   isStamp: false,
 });
 
+const summaryError = ref("");
+const deleteOpen = ref(false);
+
 const title = computed(() => (props.task?.isStamp ? "编辑图章" : "编辑任务"));
+const kindLabel = computed(() => (props.task?.isStamp ? "图章" : "任务"));
 
 watch(
   () => [props.open, props.task] as const,
@@ -31,15 +58,24 @@ watch(
     form.summary = props.task.summary;
     form.description = props.task.description ?? "";
     form.isStamp = props.task.isStamp;
+    summaryError.value = "";
+    deleteOpen.value = false;
   },
   { immediate: true },
 );
 
+function onOpenChange(next: boolean) {
+  if (!next) {
+    emit("close");
+  }
+}
+
 function submit() {
   if (!form.summary.trim()) {
-    window.alert("标题不能为空");
+    summaryError.value = "标题不能为空";
     return;
   }
+  summaryError.value = "";
   emit("save", {
     summary: form.summary.trim(),
     description: form.description.trim() || null,
@@ -48,50 +84,63 @@ function submit() {
 }
 
 function confirmDelete() {
-  if (window.confirm(`确定删除这个${props.task?.isStamp ? "图章" : "任务"}吗？`)) {
-    emit("delete");
-  }
+  deleteOpen.value = false;
+  emit("delete");
 }
 </script>
 
 <template>
-  <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-    <div class="w-full max-w-lg rounded-xl border border-border bg-background p-6 shadow-xl">
-      <h2 class="mb-4 text-lg font-semibold">{{ title }}</h2>
+  <Dialog :open="open" @update:open="onOpenChange">
+    <DialogContent
+      class="max-w-lg sm:max-w-lg"
+      :show-close-button="false"
+      @pointer-down-outside="preventOverlayDismiss"
+      @interact-outside="preventOverlayDismiss"
+    >
+      <DialogHeader>
+        <DialogTitle>{{ title }}</DialogTitle>
+      </DialogHeader>
       <div class="space-y-4">
-        <label class="block space-y-1">
-          <span class="text-sm text-muted-foreground">标题</span>
-          <input
+        <div class="space-y-1.5">
+          <Label for="task-summary">标题</Label>
+          <Input
+            id="task-summary"
             v-model="form.summary"
-            class="w-full rounded-md border border-input bg-background px-3 py-2"
             placeholder="请输入标题"
+            :aria-invalid="summaryError ? true : undefined"
+            @update:model-value="summaryError = ''"
           />
-        </label>
+          <p v-if="summaryError" class="text-destructive text-xs">{{ summaryError }}</p>
+        </div>
         <label class="flex items-center gap-2 text-sm">
-          <input v-model="form.isStamp" type="checkbox" />
+          <Checkbox v-model="form.isStamp" />
           恒定图章
         </label>
-        <label class="block space-y-1">
-          <span class="text-sm text-muted-foreground">备注</span>
-          <textarea
-            v-model="form.description"
-            rows="3"
-            class="w-full rounded-md border border-input bg-background px-3 py-2"
-          />
-        </label>
-      </div>
-      <div class="mt-6 flex justify-between gap-2">
-        <button
-          class="rounded-md border border-destructive px-4 py-2 text-destructive"
-          @click="confirmDelete"
-        >
-          删除
-        </button>
-        <div class="ml-auto flex gap-2">
-          <button class="rounded-md border border-border px-4 py-2" @click="emit('close')">取消</button>
-          <button class="rounded-md bg-primary px-4 py-2 text-primary-foreground" @click="submit">确定</button>
+        <div class="space-y-1.5">
+          <Label for="task-note">备注</Label>
+          <Textarea id="task-note" v-model="form.description" />
         </div>
       </div>
-    </div>
-  </div>
+      <DialogFooter class="sm:justify-between">
+        <Button type="button" variant="destructive" @click="deleteOpen = true">删除</Button>
+        <div class="ml-auto flex gap-2">
+          <Button type="button" variant="outline" @click="emit('close')">取消</Button>
+          <Button type="button" @click="submit">确定</Button>
+        </div>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <AlertDialog v-model:open="deleteOpen">
+    <AlertDialogContent @pointer-down-outside="preventOverlayDismiss" @interact-outside="preventOverlayDismiss">
+      <AlertDialogHeader>
+        <AlertDialogTitle>确定删除这个{{ kindLabel }}吗？</AlertDialogTitle>
+        <AlertDialogDescription>删除后无法恢复。</AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>返回</AlertDialogCancel>
+        <AlertDialogAction @click="confirmDelete">确定删除</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>

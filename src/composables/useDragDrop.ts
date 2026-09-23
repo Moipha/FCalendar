@@ -1,7 +1,9 @@
 import { useQueryClient } from "@tanstack/vue-query";
 import { type InjectionKey, onMounted, onUnmounted, ref } from "vue";
+import { toast } from "vue-sonner";
 
 import { createEvent, deleteEvent, getEvent, updateEvent } from "@/api/events";
+import { invalidateEvents } from "@/lib/calendarQueries";
 import { createTask, deleteTask, updateTask, type TaskRow } from "@/api/tasks";
 import {
   applyDropHighlight,
@@ -10,6 +12,7 @@ import {
   findDropTarget,
 } from "@/lib/dragDrop";
 import { shiftEventToDate } from "@/lib/eventReschedule";
+import { useSessionStore } from "@/stores/session";
 import { useTaskDragStore, type DropTargetKind } from "@/stores/taskDrag";
 
 type PendingSession =
@@ -35,6 +38,7 @@ function cursorForSession(session: PendingSession, target: DropTargetKind) {
 
 export function useDragDrop(calendarId: () => string) {
   const dragStore = useTaskDragStore();
+  const session = useSessionStore();
   const queryClient = useQueryClient();
 
   const pending = ref<PendingSession | null>(null);
@@ -61,7 +65,8 @@ export function useDragDrop(calendarId: () => string) {
       await deleteTask(task.id);
       await queryClient.invalidateQueries({ queryKey: ["tasks"] });
     }
-    await queryClient.invalidateQueries({ queryKey: ["events"] });
+    session.noteLocalMutation();
+    await invalidateEvents(queryClient);
   }
 
   async function dropTaskToList(task: TaskRow, isStamp: boolean) {
@@ -73,6 +78,7 @@ export function useDragDrop(calendarId: () => string) {
       description: task.description ?? null,
       isStamp,
     });
+    session.noteLocalMutation();
     await queryClient.invalidateQueries({ queryKey: ["tasks"] });
   }
 
@@ -83,7 +89,8 @@ export function useDragDrop(calendarId: () => string) {
     const event = await getEvent(eventId);
     const input = shiftEventToDate(event, sourceDate, targetDate);
     await updateEvent(eventId, input);
-    await queryClient.invalidateQueries({ queryKey: ["events"] });
+    session.noteLocalMutation();
+    await invalidateEvents(queryClient);
   }
 
   async function dropEventToInbox(eventId: string, isStamp: boolean) {
@@ -95,8 +102,9 @@ export function useDragDrop(calendarId: () => string) {
       isStamp,
     });
     await deleteEvent(eventId);
+    session.noteLocalMutation();
     await queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    await queryClient.invalidateQueries({ queryKey: ["events"] });
+    await invalidateEvents(queryClient);
   }
 
   async function commitTaskDrop(task: TaskRow, kind: DropTargetKind, date: string | null) {
@@ -199,7 +207,7 @@ export function useDragDrop(calendarId: () => string) {
       }
       await commitEventDrop(session.eventId, session.sourceDate, target, date);
     } catch (error) {
-      console.error("drag drop failed", error);
+      toast.error(error instanceof Error ? error.message : "拖放失败，请重试");
     }
   }
 

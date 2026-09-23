@@ -21,8 +21,14 @@ export function bootstrapSession() {
   return invoke<SessionSnapshot>("bootstrap_session");
 }
 
+export type SyncOutcome = {
+  snapshot: SessionSnapshot;
+  pushed: number;
+  pulled: number;
+};
+
 export function syncCurrentCalendar() {
-  return invoke<SessionSnapshot>("sync_current_calendar");
+  return invoke<SyncOutcome>("sync_current_calendar");
 }
 
 export function setCurrentCalendar(calendarId: string) {

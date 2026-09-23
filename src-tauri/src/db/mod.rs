@@ -3,7 +3,7 @@ pub(crate) mod app_state;
 pub(crate) mod calendars;
 pub(crate) mod day_colors;
 pub(crate) mod events;
-mod ics;
+pub(crate) mod ics;
 pub(crate) mod ics_patch;
 pub(crate) mod queue;
 mod sqlite_util;
@@ -275,8 +275,18 @@ pub async fn rediscover_calendars(db: tauri::State<'_, Db>) -> Result<AccountSta
         let password = crate::credentials::load_password(&credential_ref)?;
         Ok((account.server_url, account.username, password))
     })?;
-    let discovery = crate::caldav::discover(&server_url, &username, &password).await?;
-    db.with_conn(|conn| persist_rediscover(conn, discovery))
+    let discovery = match crate::caldav::discover(&server_url, &username, &password).await {
+        Ok(discovery) => discovery,
+        Err(e) => {
+            db.with_conn(|conn| crate::sync::apply_error_status(conn, &e, true))?;
+            return Err(e);
+        }
+    };
+    db.with_conn(|conn| {
+        persist_rediscover(conn, discovery)?;
+        crate::db::app_state::set_connection_status(conn, "online")?;
+        get_account_status(conn)
+    })
 }
 
 #[cfg(test)]

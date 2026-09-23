@@ -67,12 +67,16 @@ pub fn parse_multistatus(xml: &str) -> Result<Vec<ResponseItem>, String> {
                     }
                     _ if in_prop && !in_resourcetype => {
                         active_prop = Some(name.to_string());
+                        text_buf.clear();
                     }
                     _ => {}
                 }
             }
             Ok(Event::Text(t)) => {
-                text_buf = t.unescape().unwrap_or_default().into_owned();
+                text_buf.push_str(&t.unescape().unwrap_or_default());
+            }
+            Ok(Event::CData(t)) => {
+                text_buf.push_str(&String::from_utf8_lossy(t.as_ref()));
             }
             Ok(Event::End(e)) => {
                 let local = e.local_name().as_ref().to_vec();
@@ -240,5 +244,34 @@ mod tests {
         );
         assert!(supports_component(&items[0].props, "VEVENT"));
         assert!(supports_component(&items[0].props, "VTODO"));
+    }
+
+    #[test]
+    fn calendar_data_keeps_multiline_ics() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/alice/work/evt.ics</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag>"abc"</D:getetag>
+        <C:calendar-data>BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:evt-1
+SUMMARY:Hello
+DTSTART;VALUE=DATE:20260923
+END:VEVENT
+END:VCALENDAR
+</C:calendar-data>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let items = parse_multistatus(xml).unwrap();
+        let ics = prop_text(&items[0].props, &["calendar-data"]).unwrap();
+        assert!(ics.contains("BEGIN:VCALENDAR"));
+        assert!(ics.contains("UID:evt-1"));
+        assert!(ics.contains("END:VCALENDAR"));
     }
 }

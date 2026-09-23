@@ -8,7 +8,9 @@ import {
   syncCurrentCalendar,
   type ConnectionStatus,
   type SessionSnapshot,
+  type SyncOutcome,
 } from "@/api/session";
+import { reportInvokeError } from "@/lib/invokeError";
 
 export const useSessionStore = defineStore("session", () => {
   const snapshot = ref<SessionSnapshot | null>(null);
@@ -21,6 +23,11 @@ export const useSessionStore = defineStore("session", () => {
   const loggedIn = computed(() => Boolean(snapshot.value?.account));
   const pendingRemoteChanges = computed(() => snapshot.value?.pendingRemoteChanges ?? false);
   const calendars = computed(() => snapshot.value?.calendars ?? []);
+  const syncing = ref(false);
+  const currentCalendarRemote = computed(() => {
+    const id = currentCalendarId.value;
+    return Boolean(calendars.value.find((item) => item.id === id)?.accountId);
+  });
 
   function apply(next: SessionSnapshot, toastAuth = false) {
     const prev = snapshot.value?.connectionStatus;
@@ -45,19 +52,51 @@ export const useSessionStore = defineStore("session", () => {
     const remote = snapshot.value?.calendars.find((c) => c.id === id)?.accountId;
     if (remote && snapshot.value?.connectionStatus === "online") {
       try {
-        apply(await syncCurrentCalendar());
-      } catch {
+        apply((await syncCurrentCalendar()).snapshot);
+      } catch (e) {
+        reportInvokeError("切换日历同步", e);
         apply(await getSession(), true);
       }
     }
   }
 
-  async function syncNow() {
+  async function syncNow(): Promise<SyncOutcome> {
     try {
-      apply(await syncCurrentCalendar(), true);
+      const outcome = await syncCurrentCalendar();
+      apply(outcome.snapshot, true);
+      return outcome;
     } catch (e) {
+      reportInvokeError("同步当前日历", e);
       apply(await getSession(), true);
       throw e;
+    }
+  }
+
+  function noteLocalMutation() {
+    if (snapshot.value && currentCalendarRemote.value) {
+      snapshot.value = { ...snapshot.value, pendingRemoteChanges: true };
+    }
+  }
+
+  async function syncFromUi() {
+    if (syncing.value) {
+      return { kind: "busy" as const };
+    }
+    if (!loggedIn.value) {
+      return { kind: "logged_out" as const };
+    }
+    if (!currentCalendarRemote.value) {
+      return { kind: "local" as const };
+    }
+    if (connectionStatus.value === "auth_error") {
+      return { kind: "auth_error" as const };
+    }
+    syncing.value = true;
+    try {
+      const outcome = await syncNow();
+      return { kind: "ok" as const, pushed: outcome.pushed, pulled: outcome.pulled };
+    } finally {
+      syncing.value = false;
     }
   }
 
@@ -73,11 +112,15 @@ export const useSessionStore = defineStore("session", () => {
     loggedIn,
     pendingRemoteChanges,
     calendars,
+    syncing,
+    currentCalendarRemote,
     apply,
     bootstrap,
     refresh,
     selectCalendar,
     syncNow,
+    syncFromUi,
+    noteLocalMutation,
     clearAuthToast,
   };
 });

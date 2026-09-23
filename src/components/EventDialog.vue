@@ -1,7 +1,39 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 
 import type { EventRow, SaveEventInput } from "@/api/events";
+import AppDatePicker from "@/components/AppDatePicker.vue";
+import AppDateTimePicker from "@/components/AppDateTimePicker.vue";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { preventOverlayDismiss } from "@/lib/dialogDismiss";
 import {
   datePart,
   defaultTimedRange,
@@ -38,6 +70,9 @@ const form = reactive({
   recurrence: "never" as RecurrencePreset,
 });
 
+const summaryError = ref("");
+const deleteOpen = ref(false);
+
 const title = computed(() => (props.mode === "create" ? "新建事件" : "编辑事件"));
 
 function fallbackDate() {
@@ -45,6 +80,8 @@ function fallbackDate() {
 }
 
 function resetForm() {
+  summaryError.value = "";
+  deleteOpen.value = false;
   if (props.mode === "edit" && props.event) {
     form.summary = props.event.summary;
     form.description = props.event.description ?? "";
@@ -97,11 +134,18 @@ function onAllDayChange(checked: boolean) {
   form.dtend = toDatetimeLocalValue(range.dtend);
 }
 
+function onOpenChange(next: boolean) {
+  if (!next) {
+    emit("close");
+  }
+}
+
 function submit() {
   if (!form.summary.trim()) {
-    window.alert("标题不能为空");
+    summaryError.value = "标题不能为空";
     return;
   }
+  summaryError.value = "";
   emit("save", {
     calendarId: props.calendarId,
     summary: form.summary.trim(),
@@ -114,99 +158,93 @@ function submit() {
 }
 
 function confirmDelete() {
-  if (window.confirm("确定删除这个事件吗？")) {
-    emit("delete");
-  }
+  deleteOpen.value = false;
+  emit("delete");
 }
 </script>
 
 <template>
-  <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-    <div class="w-full max-w-lg rounded-xl border border-border bg-background p-6 shadow-xl">
-      <h2 class="mb-4 text-lg font-semibold">{{ title }}</h2>
+  <Dialog :open="open" @update:open="onOpenChange">
+    <DialogContent
+      class="max-w-lg sm:max-w-lg"
+      :show-close-button="false"
+      @pointer-down-outside="preventOverlayDismiss"
+      @interact-outside="preventOverlayDismiss"
+    >
+      <DialogHeader>
+        <DialogTitle>{{ title }}</DialogTitle>
+      </DialogHeader>
       <div class="space-y-4">
-        <label class="block space-y-1">
-          <span class="text-sm text-muted-foreground">标题</span>
-          <input
+        <div class="space-y-1.5">
+          <Label for="event-summary">标题</Label>
+          <Input
+            id="event-summary"
             v-model="form.summary"
-            class="w-full rounded-md border border-input bg-background px-3 py-2"
             placeholder="请输入标题"
+            :aria-invalid="summaryError ? true : undefined"
+            @update:model-value="summaryError = ''"
           />
-        </label>
+          <p v-if="summaryError" class="text-destructive text-xs">{{ summaryError }}</p>
+        </div>
         <label class="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            :checked="form.allDay"
-            @change="onAllDayChange(($event.target as HTMLInputElement).checked)"
+          <Checkbox
+            :model-value="form.allDay"
+            @update:model-value="onAllDayChange($event === true)"
           />
           全天
         </label>
         <div class="grid grid-cols-2 gap-3">
-          <label class="block space-y-1">
-            <span class="text-sm text-muted-foreground">开始</span>
-            <input
-              v-if="form.allDay"
-              :key="`all-day-start`"
-              v-model="form.dtstart"
-              type="date"
-              class="w-full rounded-md border border-input bg-background px-3 py-2"
-            />
-            <input
-              v-else
-              :key="`timed-start`"
-              v-model="form.dtstart"
-              type="datetime-local"
-              class="w-full rounded-md border border-input bg-background px-3 py-2"
-            />
-          </label>
-          <label class="block space-y-1">
-            <span class="text-sm text-muted-foreground">结束</span>
-            <input
-              v-if="form.allDay"
-              :key="`all-day-end`"
-              v-model="form.dtend"
-              type="date"
-              class="w-full rounded-md border border-input bg-background px-3 py-2"
-            />
-            <input
-              v-else
-              :key="`timed-end`"
-              v-model="form.dtend"
-              type="datetime-local"
-              class="w-full rounded-md border border-input bg-background px-3 py-2"
-            />
-          </label>
+          <div class="space-y-1.5">
+            <Label>开始</Label>
+            <AppDatePicker v-if="form.allDay" v-model="form.dtstart" />
+            <AppDateTimePicker v-else v-model="form.dtstart" />
+          </div>
+          <div class="space-y-1.5">
+            <Label>结束</Label>
+            <AppDatePicker v-if="form.allDay" v-model="form.dtend" />
+            <AppDateTimePicker v-else v-model="form.dtend" />
+          </div>
         </div>
-        <label class="block space-y-1">
-          <span class="text-sm text-muted-foreground">重复</span>
-          <select v-model="form.recurrence" class="w-full rounded-md border border-input bg-background px-3 py-2">
-            <option v-for="option in recurrenceOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label class="block space-y-1">
-          <span class="text-sm text-muted-foreground">备注</span>
-          <textarea
-            v-model="form.description"
-            rows="3"
-            class="w-full rounded-md border border-input bg-background px-3 py-2"
-          />
-        </label>
+        <div class="space-y-1.5">
+          <Label>重复</Label>
+          <Select v-model="form.recurrence">
+            <SelectTrigger class="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="option in recurrenceOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div class="space-y-1.5">
+          <Label for="event-note">备注</Label>
+          <Textarea id="event-note" v-model="form.description" />
+        </div>
       </div>
-      <div class="mt-6 flex justify-between gap-2">
-        <button
-          v-if="mode === 'edit'"
-          class="rounded-md border border-destructive px-4 py-2 text-destructive"
-          @click="confirmDelete"
-        >
+      <DialogFooter class="sm:justify-between">
+        <Button v-if="mode === 'edit'" type="button" variant="destructive" @click="deleteOpen = true">
           删除
-        </button>
+        </Button>
         <div class="ml-auto flex gap-2">
-          <button class="rounded-md border border-border px-4 py-2" @click="emit('close')">取消</button>
-          <button class="rounded-md bg-primary px-4 py-2 text-primary-foreground" @click="submit">保存</button>
+          <Button type="button" variant="outline" @click="emit('close')">取消</Button>
+          <Button type="button" @click="submit">保存</Button>
         </div>
-      </div>
-    </div>
-  </div>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <AlertDialog v-model:open="deleteOpen">
+    <AlertDialogContent @pointer-down-outside="preventOverlayDismiss" @interact-outside="preventOverlayDismiss">
+      <AlertDialogHeader>
+        <AlertDialogTitle>确定删除这个事件吗？</AlertDialogTitle>
+        <AlertDialogDescription>删除后无法恢复，重复事件会整组删除。</AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>返回</AlertDialogCancel>
+        <AlertDialogAction @click="confirmDelete">确定删除</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>

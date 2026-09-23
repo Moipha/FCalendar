@@ -9,6 +9,7 @@ import {
 
 import { DRAG_DROP_KEY } from "@/composables/useDragDrop";
 import { DAY_CELL_TINT_FILL, DAY_CELL_TINT_HOVER, type DayCellTint } from "@/lib/dayCellColors";
+import { toZonedDateTime } from "@/lib/datetime";
 import type { LunarDayInfo } from "@/lib/lunarDay";
 import { useTaskDragStore } from "@/stores/taskDrag";
 
@@ -16,6 +17,8 @@ export type MonthDayEvent = {
   instanceId: string;
   eventId: string;
   summary: string;
+  allDay: boolean;
+  dtstart: string;
 };
 
 const props = defineProps<{
@@ -106,6 +109,20 @@ function onEventButtonClick(event: MouseEvent, eventId: string) {
     return;
   }
   emit("eventClick", eventId);
+}
+
+function eventLabel(event: MonthDayEvent) {
+  if (event.allDay) {
+    return event.summary;
+  }
+  try {
+    const zoned = toZonedDateTime(event.dtstart);
+    const hour = `${zoned.hour}`.padStart(2, "0");
+    const minute = `${zoned.minute}`.padStart(2, "0");
+    return `${hour}:${minute} ${event.summary}`;
+  } catch {
+    return event.summary;
+  }
 }
 
 function onEventPointerDown(pointerEvent: PointerEvent, eventId: string, title: string) {
@@ -212,7 +229,7 @@ const daySurfaceStyle = computed(() => {
           @pointerdown.stop="onEventPointerDown($event, event.eventId, event.summary)"
           @click="onEventButtonClick($event, event.eventId)"
         >
-          {{ event.summary }}
+          {{ eventLabel(event) }}
         </button>
       </div>
     </div>
@@ -246,7 +263,7 @@ const daySurfaceStyle = computed(() => {
                 @pointerdown.stop="onEventPointerDown($event, event.eventId, event.summary)"
                 @click="onPopoverEventClick($event, event.eventId)"
               >
-                {{ event.summary }}
+                {{ eventLabel(event) }}
               </button>
             </div>
           </PopoverContent>
@@ -343,7 +360,7 @@ const daySurfaceStyle = computed(() => {
   left: 3px;
   width: 2px;
   border-radius: 1px;
-  background: color-mix(in oklab, var(--fc-day-bg, var(--background)) 80%, #333);
+  background: color-mix(in oklab, var(--fc-day-bg, var(--background)) 55%, var(--foreground));
 }
 
 .fc-month-event:active {

@@ -1,4 +1,5 @@
 import "temporal-polyfill/global";
+import "vue-sonner/style.css";
 import "./style.css";
 
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
