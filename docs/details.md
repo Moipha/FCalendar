@@ -199,4 +199,5 @@
 - shadcn-vue：`reka-nova` + Neutral；业务表单走 `src/components/ui` 原语。字体为本地 `@fontsource-variable/geist`，不用 Google Fonts。Toast 用 `vue-sonner`（底中）。
 - Rust 另用 `uuid`（v4）、`chrono`（带偏移时间 / 全天日期）；连接池为 `r2d2` + `r2d2_sqlite`
 - 开机自启插件只注册，不默认 enable
-- 单实例插件 callback 为空
+- 单实例插件：第二次启动时显示、还原并聚焦已有主窗口。主窗口 `Destroyed` 后 `exit(0)`，避免只剩 `{id}-siw` 时进程仍占着互斥量。
+- WebView2 用户数据：启动时设 `WEBVIEW2_USER_DATA_FOLDER`。优先 `{exe 目录}/webview2-data`（`pnpm tauri dev` 即 `src-tauri/target/debug/webview2-data`）。本机 `%LOCALAPPDATA%` 继承 ACL 只有管理员可写，子进程对默认 `com.f.cal` 目录会 `0x8000FFFF`；该目录被占用时是 `0x800700AA`。失败时 Tao 窗口闪一下就被 `DestroyMsg` 拆掉。stderr 打 HRESULT；约 400ms 后没有 `FCalendar` 窗口则 `exit(1)`。日历数据在 SQLite。
