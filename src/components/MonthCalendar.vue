@@ -801,7 +801,7 @@ onBeforeUnmount(() => {
     <Teleport defer to="#app-title-leading">
       <div @pointerdown.stop>
         <AppDatePicker :model-value="selectedDateValue()" @update:model-value="onTitleDatePicked">
-          <Button type="button" variant="ghost" class="h-8 px-1.5 text-base font-medium">
+          <Button type="button" variant="ghost" class="h-8 px-1.5 text-[15px] font-semibold tracking-tight">
             {{ monthLabel }}
           </Button>
         </AppDatePicker>
@@ -811,20 +811,20 @@ onBeforeUnmount(() => {
         @pointerdown.stop="onChromeDragPointerDown"
         @dblclick.stop.prevent="onChromeDblClick"
       />
-      <div class="flex items-center gap-1" @pointerdown.stop>
-        <Button variant="ghost" size="icon" title="上个月" @click="shiftMonth(-1)">
+      <div class="flex items-center gap-0.5" @pointerdown.stop>
+        <Button variant="ghost" size="icon" aria-label="上个月" title="上个月" @click="shiftMonth(-1)">
           <ChevronLeft />
         </Button>
-        <Button variant="ghost" size="icon" title="回到当前月" @click="goToday">
+        <Button variant="ghost" size="icon" aria-label="回到当前月" title="回到当前月" @click="goToday">
           <Circle class="size-3.5" />
         </Button>
-        <Button variant="ghost" size="icon" title="下个月" @click="shiftMonth(1)">
+        <Button variant="ghost" size="icon" aria-label="下个月" title="下个月" @click="shiftMonth(1)">
           <ChevronRight />
         </Button>
       </div>
     </Teleport>
 
-    <div class="flex min-h-0 flex-1 flex-col p-3">
+    <div class="flex min-h-0 flex-1 flex-col px-2 pt-1 pb-2">
       <div class="grid shrink-0 grid-cols-7 border-b border-border text-center text-xs text-muted-foreground">
         <div v-for="label in weekdayLabels" :key="label" class="py-2">{{ label }}</div>
       </div>
@@ -853,7 +853,7 @@ onBeforeUnmount(() => {
           <div
             v-for="{ weekMonday, index } in visibleWeeks"
             :key="weekMonday.toString()"
-            class="fc-month-week grid grid-cols-7 border-b border-border"
+            class="fc-month-week grid grid-cols-7 border-b border-border/80"
             :style="{
               height: weekHeight > 0 ? `${weekHeight}px` : undefined,
               top: weekHeight > 0 ? `${index * weekHeight}px` : undefined,
@@ -862,7 +862,7 @@ onBeforeUnmount(() => {
             <MonthDayCell
               v-for="day in enumerateDaysInWeek(weekMonday)"
               :key="day.toString()"
-              class="border-r border-border last:border-r-0"
+              class="border-r border-border/80 last:border-r-0"
               :date="day.toString()"
               :day-number="day.day"
               :week-height="weekHeight"

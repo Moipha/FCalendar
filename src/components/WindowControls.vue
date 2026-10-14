@@ -9,13 +9,21 @@ const { isMaximized, minimizeWindow, toggleMaximize, closeWindow } = useWindowCo
 
 <template>
   <div class="flex items-center">
-    <Button variant="ghost" size="icon" class="rounded-md" title="最小化" @click="minimizeWindow">
+    <Button
+      variant="ghost"
+      size="icon"
+      class="rounded-md"
+      aria-label="最小化"
+      title="最小化"
+      @click="minimizeWindow"
+    >
       <Minus />
     </Button>
     <Button
       variant="ghost"
       size="icon"
       class="rounded-md"
+      :aria-label="isMaximized ? '还原' : '最大化'"
       :title="isMaximized ? '还原' : '最大化'"
       @click="toggleMaximize"
     >
@@ -26,6 +34,7 @@ const { isMaximized, minimizeWindow, toggleMaximize, closeWindow } = useWindowCo
       variant="ghost"
       size="icon"
       class="rounded-md hover:bg-destructive/15 hover:text-destructive"
+      aria-label="关闭"
       title="关闭"
       @click="closeWindow"
     >

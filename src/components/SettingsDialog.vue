@@ -34,7 +34,12 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { preventOverlayDismiss } from "@/lib/dialogDismiss";
 import { reportInvokeError } from "@/lib/invokeError";
-import { DEFAULT_JIEQI_COLORS, THEME_PRESETS, type JieqiSeason } from "@/lib/settingsTheme";
+import {
+  COLOR_SCHEME_OPTIONS,
+  DEFAULT_JIEQI_COLORS,
+  THEME_PRESETS,
+  type JieqiSeason,
+} from "@/lib/settingsTheme";
 import { useSessionStore } from "@/stores/session";
 import {
   UPCOMING_DAY_OPTIONS,
@@ -235,6 +240,7 @@ function copyFromStore(): Draft {
     weekStart: settings.weekStart,
     showMinorFestivals: settings.showMinorFestivals,
     scrollSnapWeeks: settings.scrollSnapWeeks,
+    colorScheme: settings.colorScheme,
   };
 }
 
@@ -308,14 +314,14 @@ const upcomingDaysModel = computed({
       </DialogHeader>
 
       <div class="flex min-h-0 flex-1 border-t border-border">
-        <nav class="flex w-[140px] shrink-0 flex-col gap-1 border-r border-border p-2">
+        <nav class="bg-sidebar/60 flex w-[140px] shrink-0 flex-col gap-1 border-r border-border p-2">
           <Button
             v-for="item in navItems"
             :key="item.id"
             type="button"
             variant="ghost"
-            class="justify-start"
-            :class="page === item.id ? 'bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary' : ''"
+            class="justify-start rounded-md"
+            :class="page === item.id ? 'bg-primary/12 text-primary hover:bg-primary/12 hover:text-primary' : ''"
             @click="page = item.id"
           >
             {{ item.label }}
@@ -440,6 +446,19 @@ const upcomingDaysModel = computed({
 
             <section v-else-if="page === 'appearance'" class="space-y-5">
               <div>
+                <p class="text-muted-foreground mb-2 text-sm">外观</p>
+                <RadioGroup v-model="draft.colorScheme" class="flex flex-row flex-wrap gap-4">
+                  <label
+                    v-for="option in COLOR_SCHEME_OPTIONS"
+                    :key="option.id"
+                    class="flex items-center gap-2 text-sm"
+                  >
+                    <RadioGroupItem :value="option.id" />
+                    {{ option.label }}
+                  </label>
+                </RadioGroup>
+              </div>
+              <div>
                 <p class="text-muted-foreground mb-2 text-sm">主题色</p>
                 <div class="flex flex-wrap items-center gap-2">
                   <ColorSwatchInput v-model="draft.primaryColor" aria-label="主题色" />
@@ -450,6 +469,7 @@ const upcomingDaysModel = computed({
                     variant="outline"
                     class="size-8 p-0"
                     :style="{ backgroundColor: preset.hex }"
+                    :aria-label="preset.label"
                     :title="preset.label"
                     @click="setPrimary(preset.hex)"
                   />

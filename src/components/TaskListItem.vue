@@ -69,7 +69,7 @@ function onDoubleClick(event: MouseEvent) {
   <div
     v-if="inlineEditing"
     ref="editWrapRef"
-    class="border-b border-border/60 px-3 py-2"
+    class="mx-1 rounded-md px-2 py-1.5"
     @keydown.esc.prevent="emit('inlineCancel')"
   >
     <Input
@@ -81,7 +81,7 @@ function onDoubleClick(event: MouseEvent) {
   </div>
   <div
     v-else
-    class="group hover:bg-muted/40 flex items-center gap-1 border-b border-border/60 px-2 py-2"
+    class="group hover:bg-sidebar-accent mx-1 flex items-center gap-1 rounded-md px-2 py-1.5"
     @contextmenu="onContextMenu"
     @dblclick="onDoubleClick"
     @pointerdown="onPointerDown"
@@ -93,6 +93,7 @@ function onDoubleClick(event: MouseEvent) {
       variant="ghost"
       size="icon-xs"
       class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+      aria-label="编辑任务"
       @pointerdown.stop
       @click.stop="emit('openEdit', task)"
     >

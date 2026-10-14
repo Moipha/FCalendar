@@ -66,7 +66,7 @@ onMounted(() => {
 <template>
   <div
     ref="menuRef"
-    class="fc-day-context-menu fixed z-[100] min-w-[11rem] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+    class="fc-day-context-menu fixed z-[100] min-w-[11rem] rounded-xl border border-border bg-popover/90 p-1 text-sm text-popover-foreground shadow-lg backdrop-blur-md"
     :style="{ left: `${pos.left}px`, top: `${pos.top}px` }"
     role="menu"
     @contextmenu.prevent
@@ -74,7 +74,7 @@ onMounted(() => {
     <button
       v-if="showClearColor"
       type="button"
-      class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
+      class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
       role="menuitem"
       @click="emit('clearColors')"
     >
@@ -85,7 +85,7 @@ onMounted(() => {
     <button
       v-if="mode === 'single'"
       type="button"
-      class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
+      class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
       role="menuitem"
       @click="emit('create')"
     >
@@ -96,7 +96,7 @@ onMounted(() => {
     <div v-if="!showColorPicker">
       <button
         type="button"
-        class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted"
+        class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
         role="menuitem"
         @click="emit('expandColors')"
       >
@@ -128,6 +128,7 @@ onMounted(() => {
               : 'border-transparent'
         "
         :style="{ background: DAY_CELL_TINT_SWATCH[tint] }"
+        :aria-label="DAY_CELL_TINT_LABEL[tint]"
         :title="DAY_CELL_TINT_LABEL[tint]"
         @click.stop="emit('pickColor', tint)"
       />

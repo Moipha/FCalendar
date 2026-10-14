@@ -224,7 +224,7 @@ const daySurfaceStyle = computed(() => {
           v-for="event in visibleEvents"
           :key="event.instanceId"
           type="button"
-          class="fc-month-event relative block w-full truncate rounded py-0.5 pr-1 pl-2 text-left text-[11px] leading-tight"
+          class="fc-month-event relative block w-full truncate rounded-[5px] py-0.5 pr-1 pl-2.5 text-left text-[11px] leading-tight"
           :class="{ 'fc-month-event--outside': outsideMonth }"
           @pointerdown.stop="onEventPointerDown($event, event.eventId, event.summary)"
           @click="onEventButtonClick($event, event.eventId)"
@@ -239,7 +239,8 @@ const daySurfaceStyle = computed(() => {
         <PopoverTrigger as-child>
           <button
             type="button"
-            class="inline-flex size-4 items-center justify-center rounded-full border border-border bg-muted/70 text-[9px] font-medium text-muted-foreground"
+            class="inline-flex size-4 items-center justify-center rounded-full border border-border bg-muted/70 text-[9px] font-medium text-muted-foreground outline-none focus-visible:ring-ring/50 focus-visible:ring-3"
+            :aria-label="`还有 ${overflowCount} 个事件`"
             @click="onOverflowClick"
           >
             +{{ overflowCount }}
@@ -247,7 +248,7 @@ const daySurfaceStyle = computed(() => {
         </PopoverTrigger>
         <PopoverPortal>
           <PopoverContent
-            class="fc-month-event-popover z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-md outline-none"
+            class="fc-month-event-popover z-50 w-44 rounded-xl border border-border bg-popover/90 p-1 shadow-lg outline-none backdrop-blur-md"
             side="right"
             align="start"
             :side-offset="6"
@@ -259,7 +260,7 @@ const daySurfaceStyle = computed(() => {
                 v-for="event in events"
                 :key="event.instanceId"
                 type="button"
-                class="fc-month-event relative block w-full truncate rounded py-0.5 pr-1 pl-2 text-left text-[11px] leading-tight"
+                class="fc-month-event relative block w-full truncate rounded-[5px] py-0.5 pr-1 pl-2.5 text-left text-[11px] leading-tight"
                 @pointerdown.stop="onEventPointerDown($event, event.eventId, event.summary)"
                 @click="onPopoverEventClick($event, event.eventId)"
               >
@@ -347,20 +348,7 @@ const daySurfaceStyle = computed(() => {
 }
 
 .fc-month-event {
-  background: color-mix(in oklab, var(--primary) 16%, var(--background));
-  color: var(--foreground);
   cursor: grab;
-}
-
-.fc-month-event::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 3px;
-  width: 2px;
-  border-radius: 1px;
-  background: color-mix(in oklab, var(--fc-day-bg, var(--background)) 55%, var(--foreground));
 }
 
 .fc-month-event:active {

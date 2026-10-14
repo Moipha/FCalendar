@@ -4,6 +4,8 @@ import {
   applyAppearanceToDocument,
   DEFAULT_JIEQI_COLORS,
   DEFAULT_PRIMARY,
+  parseColorScheme,
+  type ColorScheme,
   type JieqiSeason,
 } from "@/lib/settingsTheme";
 
@@ -19,6 +21,7 @@ export type AppSettings = {
   weekStart: WeekStart;
   showMinorFestivals: boolean;
   scrollSnapWeeks: boolean;
+  colorScheme: ColorScheme;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -28,6 +31,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   weekStart: "monday",
   showMinorFestivals: true,
   scrollSnapWeeks: true,
+  colorScheme: "system",
 };
 
 const STORAGE_KEY = "fc.settings.v1";
@@ -56,6 +60,7 @@ function parseSettings(raw: string | null): AppSettings {
       weekStart: data.weekStart === "sunday" ? "sunday" : "monday",
       showMinorFestivals: data.showMinorFestivals !== false,
       scrollSnapWeeks: data.scrollSnapWeeks !== false,
+      colorScheme: parseColorScheme(data.colorScheme),
     };
   } catch {
     return { ...DEFAULT_SETTINGS, jieqiColors: { ...DEFAULT_JIEQI_COLORS } };
@@ -98,10 +103,10 @@ export const useSettingsStore = defineStore("settings", {
     hydrate() {
       const loaded = readSettings();
       Object.assign(this, loaded, { dialogOpen: this.dialogOpen });
-      applyAppearanceToDocument(this.primaryColor, this.jieqiColors);
+      applyAppearanceToDocument(this.primaryColor, this.jieqiColors, this.colorScheme);
     },
     applyAppearance() {
-      applyAppearanceToDocument(this.primaryColor, this.jieqiColors);
+      applyAppearanceToDocument(this.primaryColor, this.jieqiColors, this.colorScheme);
     },
     persist() {
       const payload: AppSettings = {
@@ -111,13 +116,14 @@ export const useSettingsStore = defineStore("settings", {
         weekStart: this.weekStart,
         showMinorFestivals: this.showMinorFestivals,
         scrollSnapWeeks: this.scrollSnapWeeks,
+        colorScheme: this.colorScheme,
       };
       writeSettings(payload);
       this.applyAppearance();
     },
     patch(partial: Partial<AppSettings>) {
       Object.assign(this, partial);
-      if (partial.primaryColor || partial.jieqiColors) {
+      if (partial.primaryColor || partial.jieqiColors || partial.colorScheme) {
         this.applyAppearance();
       }
     },

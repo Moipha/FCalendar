@@ -5,7 +5,7 @@ import { onChromeDblClick, onChromeDragPointerDown } from "@/lib/windowDrag";
 
 <template>
   <div
-    class="relative flex h-12 shrink-0 items-center border-b border-border bg-background px-4"
+    class="relative flex h-12 shrink-0 items-center border-b border-border/80 bg-background px-3"
   >
     <div
       id="app-title-leading"

@@ -166,9 +166,9 @@ function cancelInline() {
 
 <template>
   <div class="flex h-full min-h-0 flex-col text-foreground">
-    <div class="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-      <span class="text-sm font-medium">任务区</span>
-      <Button type="button" variant="outline" size="icon-sm" title="添加任务" @click="startDraft">
+    <div class="flex shrink-0 items-center justify-between border-b border-sidebar-border px-3 py-2">
+      <span class="text-sm font-semibold tracking-tight">任务区</span>
+      <Button type="button" variant="ghost" size="icon-sm" aria-label="添加任务" title="添加任务" @click="startDraft">
         <Plus />
       </Button>
     </div>
@@ -177,7 +177,8 @@ function cancelInline() {
       <section data-drop-zone="tasks">
         <button
           type="button"
-          class="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/30"
+          class="mx-1 flex w-[calc(100%-0.5rem)] items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:bg-sidebar-accent"
+          :aria-label="tasksExpanded ? '收起任务' : '展开任务'"
           :title="tasksExpanded ? '收起' : '展开'"
           @click="tasksExpanded = !tasksExpanded"
         >
@@ -200,7 +201,7 @@ function cancelInline() {
             <div
               v-if="draftActive"
               ref="draftWrapRef"
-              class="border-b border-border/60 px-3 py-2"
+              class="mx-1 rounded-md px-2 py-1.5"
               @keydown.esc.prevent="cancelDraft"
             >
               <Input
@@ -234,10 +235,11 @@ function cancelInline() {
         </div>
       </section>
 
-      <section class="border-t border-border" data-drop-zone="stamps">
+      <section class="border-t border-sidebar-border" data-drop-zone="stamps">
         <button
           type="button"
-          class="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/30"
+          class="mx-1 flex w-[calc(100%-0.5rem)] items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:bg-sidebar-accent"
+          :aria-label="stampsExpanded ? '收起图章' : '展开图章'"
           :title="stampsExpanded ? '收起' : '展开'"
           @click="stampsExpanded = !stampsExpanded"
         >

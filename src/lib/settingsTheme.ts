@@ -3,7 +3,7 @@ export const DEFAULT_PRIMARY = "#343434";
 
 export const THEME_PRESETS = [
   { id: "default", label: "默认", hex: "#343434" },
-  { id: "blue", label: "蓝", hex: "#2563eb" },
+  { id: "blue", label: "蓝", hex: "#007AFF" },
   { id: "green", label: "绿", hex: "#16a34a" },
   { id: "amber", label: "琥珀", hex: "#d97706" },
   { id: "rose", label: "玫红", hex: "#e11d48" },
@@ -17,6 +17,17 @@ export const DEFAULT_JIEQI_COLORS = {
 } as const;
 
 export type JieqiSeason = keyof typeof DEFAULT_JIEQI_COLORS;
+
+export type ColorScheme = "light" | "dark" | "system";
+
+export const COLOR_SCHEME_OPTIONS: { id: ColorScheme; label: string }[] = [
+  { id: "light", label: "浅色" },
+  { id: "dark", label: "深色" },
+  { id: "system", label: "跟随系统" },
+];
+
+let currentScheme: ColorScheme = "system";
+let listeningSystemScheme = false;
 
 function hexToRgb(hex: string) {
   const normalized = hex.replace("#", "");
@@ -49,7 +60,45 @@ export function hexToOklchPrimary(hex: string) {
   return hex;
 }
 
-export function applyAppearanceToDocument(primary: string, jieqi: Record<JieqiSeason, string>) {
+export function parseColorScheme(value: unknown): ColorScheme {
+  if (value === "light" || value === "dark" || value === "system") {
+    return value;
+  }
+  return "system";
+}
+
+function prefersDark() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function syncDarkClass() {
+  const dark = currentScheme === "dark" || (currentScheme === "system" && prefersDark());
+  document.documentElement.classList.toggle("dark", dark);
+}
+
+function ensureSystemSchemeListener() {
+  if (listeningSystemScheme) {
+    return;
+  }
+  listeningSystemScheme = true;
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (currentScheme === "system") {
+      syncDarkClass();
+    }
+  });
+}
+
+export function applyColorScheme(scheme: ColorScheme) {
+  currentScheme = scheme;
+  ensureSystemSchemeListener();
+  syncDarkClass();
+}
+
+export function applyAppearanceToDocument(
+  primary: string,
+  jieqi: Record<JieqiSeason, string>,
+  colorScheme?: ColorScheme | null,
+) {
   const root = document.documentElement;
   const fg = primaryForegroundFor(primary);
   root.style.setProperty("--primary", hexToOklchPrimary(primary));
@@ -58,4 +107,8 @@ export function applyAppearanceToDocument(primary: string, jieqi: Record<JieqiSe
   root.style.setProperty("--fc-jieqi-summer", jieqi.summer);
   root.style.setProperty("--fc-jieqi-autumn", jieqi.autumn);
   root.style.setProperty("--fc-jieqi-winter", jieqi.winter);
+  if (colorScheme) {
+    applyColorScheme(colorScheme);
+  }
 }
+

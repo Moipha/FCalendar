@@ -36,7 +36,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       data-slot="dialog-content"
       v-bind="{ ...$attrs, ...forwarded }"
       :disable-outside-pointer-events="false"
-      :class="cn('bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 ring-foreground/10 grid max-w-[calc(100%-2rem)] gap-4 rounded-xl p-4 text-sm ring-1 duration-100 sm:max-w-sm pointer-events-auto fixed top-1/2 left-1/2 z-[60] w-full -translate-x-1/2 -translate-y-1/2 outline-none', props.class)"
+      :class="cn('bg-popover/90 text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 ring-foreground/10 grid max-w-[calc(100%-2rem)] gap-4 rounded-xl p-4 text-sm shadow-lg ring-1 backdrop-blur-md duration-100 sm:max-w-sm pointer-events-auto fixed top-1/2 left-1/2 z-[60] w-full -translate-x-1/2 -translate-y-1/2 outline-none', props.class)"
     >
       <slot />
 
@@ -45,9 +45,9 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
         data-slot="dialog-close"
         as-child
       >
-        <Button variant="ghost" class="absolute top-2 right-2" size="icon-sm">
+        <Button variant="ghost" class="absolute top-2 right-2" size="icon-sm" aria-label="关闭">
           <XIcon />
-          <span class="sr-only">Close</span>
+          <span class="sr-only">关闭</span>
         </Button>
       </DialogClose>
     </DialogContent>

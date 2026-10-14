@@ -109,10 +109,21 @@ function startDragging(event: PointerEvent) {
 function railButtonClass(page: "tasks" | "overview") {
   const active = !layout.taskPaneHidden && layout.sidePanePage === page;
   return [
-    "mx-3 mt-3 flex h-10 items-center justify-center rounded-md",
-    active ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted/60",
+    "mx-3 mt-3 flex h-10 items-center justify-center rounded-lg outline-none",
+    "focus-visible:ring-ring/50 focus-visible:ring-3",
+    active ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-sidebar-accent",
   ];
 }
+
+const statusAriaLabel = computed(() => {
+  if (session.connectionStatus === "online") {
+    return "在线";
+  }
+  if (session.connectionStatus === "auth_error") {
+    return "密码无效";
+  }
+  return "离线";
+});
 
 const statusDotClass = computed(() => {
   if (session.connectionStatus === "online") {
@@ -171,13 +182,14 @@ async function onManualSync() {
     <div class="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <aside
         :style="{ width: `${layout.railWidth}px` }"
-        class="relative flex shrink-0 flex-col border-r border-border bg-background"
+        class="relative flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar"
         @pointerdown="onChromeDragPointerDown"
         @dblclick="onChromeDblClick"
       >
         <button
           type="button"
           :class="railButtonClass('tasks')"
+          aria-label="任务区"
           @pointerdown.stop
           @click="layout.selectSidePage('tasks')"
         >
@@ -186,6 +198,7 @@ async function onManualSync() {
         <button
           type="button"
           :class="railButtonClass('overview')"
+          aria-label="概览"
           @pointerdown.stop
           @click="layout.selectSidePage('overview')"
         >
@@ -195,7 +208,8 @@ async function onManualSync() {
           <button
             v-if="session.connectionStatus !== 'logged_out'"
             type="button"
-            class="flex size-5 items-center justify-center"
+            class="flex size-5 items-center justify-center rounded-full outline-none focus-visible:ring-ring/50 focus-visible:ring-3"
+            :aria-label="statusAriaLabel"
             @pointerdown.stop
             @click="settings.openDialog()"
           >
@@ -204,7 +218,8 @@ async function onManualSync() {
           <button
             v-if="session.loggedIn"
             type="button"
-            class="text-muted-foreground hover:bg-muted/60 relative flex h-10 w-full items-center justify-center rounded-md disabled:opacity-50"
+            class="text-muted-foreground hover:bg-sidebar-accent relative flex h-10 w-full items-center justify-center rounded-lg outline-none focus-visible:ring-ring/50 focus-visible:ring-3 disabled:opacity-50"
+            aria-label="同步"
             :disabled="session.syncing"
             @pointerdown.stop
             @click="onManualSync"
@@ -217,7 +232,8 @@ async function onManualSync() {
           </button>
           <button
             type="button"
-            class="text-muted-foreground hover:bg-muted/60 flex h-10 w-full items-center justify-center rounded-md"
+            class="text-muted-foreground hover:bg-sidebar-accent flex h-10 w-full items-center justify-center rounded-lg outline-none focus-visible:ring-ring/50 focus-visible:ring-3"
+            aria-label="设置"
             @pointerdown.stop
             @click="settings.openDialog()"
           >
@@ -229,7 +245,7 @@ async function onManualSync() {
       <section
         v-if="!layout.taskPaneHidden"
         :style="{ width: `${layout.taskPaneWidth}px` }"
-        class="bg-muted/10 flex h-full min-h-0 shrink-0 flex-col border-r border-border"
+        class="bg-sidebar flex h-full min-h-0 shrink-0 flex-col border-r border-sidebar-border"
       >
         <TaskPane
           v-show="layout.sidePanePage === 'tasks'"
@@ -245,7 +261,7 @@ async function onManualSync() {
 
       <div
         v-if="!layout.taskPaneHidden"
-        class="w-1 shrink-0 cursor-col-resize select-none bg-border/60 transition-colors hover:bg-primary"
+        class="w-1 shrink-0 cursor-col-resize select-none bg-transparent transition-colors hover:bg-primary/70"
         @pointerdown="startDragging"
       />
 
